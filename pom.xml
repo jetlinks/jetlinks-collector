@@ -4,10 +4,14 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.jetlinks</groupId>
+    <groupId>org.jetlinks.collector</groupId>
     <artifactId>jetlinks-collector</artifactId>
     <packaging>pom</packaging>
     <version>1.0.0-SNAPSHOT</version>
+
+    <modules>
+        <module>serial-port</module>
+    </modules>
 
     <name>JetLinks Collector</name>
     <url>https://github.com/jetlinks</url>
@@ -46,9 +50,10 @@
         <project.build.locales>zh_CN</project.build.locales>
         <java.version>17</java.version>
         <project.build.jdk>${java.version}</project.build.jdk>
-        <reactor.version>2020.0.14</reactor.version>
+        <reactor.version>2024.0.4</reactor.version>
         <slf4j.version>1.7.36</slf4j.version>
         <jetlinks.core.version>1.3.0-SNAPSHOT</jetlinks.core.version>
+        <jetlinks.plugin.version>1.0.3</jetlinks.plugin.version>
         <hsweb.framework.version>4.0.18</hsweb.framework.version>
         <spring.boot.version>3.4.3</spring.boot.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
@@ -183,6 +188,12 @@
             </dependency>
 
             <dependency>
+                <groupId>org.jetlinks.collector</groupId>
+                <artifactId>serial-port</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
                 <groupId>org.jetlinks.sdk</groupId>
                 <artifactId>jetlinks-sdk-api</artifactId>
                 <version>${project.version}</version>
@@ -198,6 +209,18 @@
                 <groupId>org.jetlinks</groupId>
                 <artifactId>jetlinks-core</artifactId>
                 <version>${jetlinks.core.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.jetlinks</groupId>
+                <artifactId>jetlinks-supports</artifactId>
+                <version>${jetlinks.core.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.jetlinks.plugin</groupId>
+                <artifactId>plugin-core</artifactId>
+                <version>${jetlinks.plugin.version}</version>
             </dependency>
 
             <dependency>
