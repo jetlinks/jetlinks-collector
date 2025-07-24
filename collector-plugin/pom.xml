@@ -9,26 +9,18 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>serial-port</artifactId>
-    <name>JetLinks Collector SerialPort Support</name>
-    <description>对串口通信的支持</description>
+    <artifactId>collector-plugin</artifactId>
+    <name>JetLinks Collector Plugin Support</name>
+    <description>通过插件来拓展数采提供商</description>
 
     <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
-
         <dependency>
-            <groupId>org.jetlinks</groupId>
-            <artifactId>jetlinks-supports</artifactId>
+            <groupId>org.jetlinks.plugin</groupId>
+            <artifactId>plugin-core</artifactId>
         </dependency>
-
-        <dependency>
-            <groupId>com.fazecast</groupId>
-            <artifactId>jSerialComm</artifactId>
-            <version>2.9.2</version>
-        </dependency>
-
     </dependencies>
-
 </project>
