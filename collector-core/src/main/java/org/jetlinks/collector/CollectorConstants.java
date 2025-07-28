@@ -8,6 +8,15 @@ import org.jetlinks.core.metadata.Feature;
 
 public interface CollectorConstants {
 
+
+
+    interface Metrics{
+        String complete = "complete";
+        String collect = "collect";
+
+        String pending = "pending";
+    }
+
     interface Headers {
 
         HeaderKey<String> pointId = HeaderKey.of("pointId", null, String.class);
