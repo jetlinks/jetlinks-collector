@@ -75,7 +75,7 @@
                             <publishingServerId>central</publishingServerId>
                             <autoPublish>true</autoPublish>
                             <waitUntil>validated</waitUntil>
-                            <deploymentName>jetlinks:${project.version}</deploymentName>
+                            <deploymentName>JetLinks Collector:${project.version}</deploymentName>
                         </configuration>
                     </plugin>
 
