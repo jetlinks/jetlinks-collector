@@ -1,7 +1,7 @@
 package org.jetlinks.collector.plugin;
 
 import org.hswebframework.web.i18n.LocaleUtils;
-import org.jetlinks.core.collector.DataCollectorProvider;
+import org.jetlinks.collector.DataCollectorProvider;
 import org.jetlinks.plugin.core.AbstractPlugin;
 import org.jetlinks.plugin.core.PluginContext;
 import org.jetlinks.plugin.core.PluginType;
@@ -40,7 +40,7 @@ public abstract class DataCollectorPlugin extends AbstractPlugin {
      *
      * @return DataCollectorProvider
      * @see DataCollectorProvider
-     * @see org.jetlinks.supports.collector.AbstractDataCollectorProvider
+     * @see org.jetlinks.collector.AbstractDataCollectorProvider
      */
     public abstract Iterable<DataCollectorProvider> createProviders();
 

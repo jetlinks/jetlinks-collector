@@ -9,26 +9,17 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>collector-plugin</artifactId>
-    <name>JetLinks Collector Plugin Support</name>
-    <description>通过插件来拓展数采提供商</description>
+    <artifactId>collector-core</artifactId>
+    <name>JetLinks Collector Core</name>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
-
         <dependency>
-            <groupId>org.jetlinks.plugin</groupId>
-            <artifactId>plugin-core</artifactId>
+            <groupId>org.jetlinks</groupId>
+            <artifactId>jetlinks-supports</artifactId>
         </dependency>
-
-        <dependency>
-            <groupId>org.jetlinks.collector</groupId>
-            <artifactId>collector-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
     </dependencies>
 </project>

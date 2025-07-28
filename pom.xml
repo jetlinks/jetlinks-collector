@@ -12,6 +12,7 @@
     <modules>
         <module>serial-port</module>
         <module>collector-plugin</module>
+        <module>collector-core</module>
     </modules>
 
     <name>JetLinks Collector</name>
