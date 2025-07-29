@@ -2,6 +2,7 @@ package org.jetlinks.collector.serial;
 
 import com.fazecast.jSerialComm.SerialPort;
 import io.netty.buffer.ByteBuf;
+import org.jetlinks.core.monitor.Monitor;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -15,20 +16,7 @@ import java.util.function.Function;
  * <pre>{@code
  * //modbus简单示例
  * SerialPortClient client = SerialPortClient
- *      .create(serialPort, new PipePayloadParser()
- *      .fixed(3)
- *      .handler((buffer, parser) -> {
- *         //地址
- *        byte addr = buffer.getByte(0);
- *        //功能码
- *        int code = buffer.getUnsignedByte(1);
- *        //长度
- *        int len = buffer.getUnsignedByte(2) + 2;
- *        System.out.printf("addr:%x,code:%x,len:%s \n", addr, code, len);
- *        //读取下一个长度报文
- *        parser.fixed(len).result(buffer);
- *        })
- *       .handler((buffer, parser) -> parser.result(buffer).complete()));
+ *      .create(serialPort);
  * }</pre>
  *
  * @author zhouhao
@@ -38,13 +26,15 @@ import java.util.function.Function;
  */
 public interface SerialPortClient extends Disposable {
 
+    String getPath();
+
     /**
      * 发送数据并接收响应
      *
      * @param buf     数据
-     * @param timeout 超时时间,超时未获取到数据时将返回empty.
+     * @param timeout 超时时间,数据发送到串口后等待响应的超时时间
      * @return 响应数据
-     * @see java.util.concurrent.TimeoutException
+     * @see RequestTimeoutException
      * @see Mono#onErrorResume(Function)
      */
     Mono<ByteBuf> sendAndReceive(ByteBuf buf, Duration timeout);
@@ -76,8 +66,20 @@ public interface SerialPortClient extends Disposable {
      * @param maxQueueSize 最大队列长度
      * @return 串口客户端
      */
+    static SerialPortClient create(SerialPortConfig port, PayloadParser parser, int maxQueueSize, Monitor monitor) {
+        return new DefaultSerialPortClient(port, parser, maxQueueSize, monitor);
+    }
+
+    /**
+     * 基于已经打开的串口创建客户端,在收到串口数据后,会根据{@link PayloadParser}的规则解析出完整报文后返回给发起方.
+     *
+     * @param port         串口
+     * @param parser       完整报文解析器
+     * @param maxQueueSize 最大队列长度
+     * @return 串口客户端
+     */
     static SerialPortClient create(SerialPort port, PayloadParser parser, int maxQueueSize) {
-        return new DefaultSerialPortClient(port, parser, maxQueueSize);
+        return new DefaultSerialPortClient(port, parser, maxQueueSize, Monitor.noop());
     }
 
     /**

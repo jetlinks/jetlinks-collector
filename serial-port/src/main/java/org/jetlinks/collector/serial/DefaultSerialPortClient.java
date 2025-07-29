@@ -9,6 +9,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jetlinks.collector.CollectorConstants;
+import org.jetlinks.core.monitor.Monitor;
 import org.slf4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.Disposables;
@@ -35,6 +37,7 @@ public class DefaultSerialPortClient implements
         WIP = AtomicIntegerFieldUpdater.newUpdater(DefaultSerialPortClient.class, "wip");
 
     private final SerialPort port;
+    private final SerialPortConfig config;
 
     private final PayloadParser parser;
 
@@ -51,10 +54,29 @@ public class DefaultSerialPortClient implements
     private final Scheduler scheduler;
 
     private final int maxQueueSize;
+    private final Monitor monitor;
+    private final Logger logger;
 
-    private Logger logger = log;
+    public DefaultSerialPortClient(SerialPortConfig config,
+                                   PayloadParser parser,
+                                   int maxQueueSize,
+                                   Monitor monitor) {
+        this(config, config.create(), parser, maxQueueSize, monitor);
+    }
 
-    public DefaultSerialPortClient(SerialPort port, PayloadParser parser, int maxQueueSize) {
+    public DefaultSerialPortClient(SerialPort port,
+                                   PayloadParser parser,
+                                   int maxQueueSize,
+                                   Monitor monitor) {
+        this(SerialPortConfig.of(port), port, parser, maxQueueSize, monitor);
+    }
+
+    public DefaultSerialPortClient(SerialPortConfig config,
+                                   SerialPort port,
+                                   PayloadParser parser,
+                                   int maxQueueSize,
+                                   Monitor monitor) {
+        this.config = config;
         this.port = port;
         this.parser = parser;
         this.out = port.getOutputStream();
@@ -66,11 +88,24 @@ public class DefaultSerialPortClient implements
                 .handlePayload()
                 .subscribe(this::handleBuffer)
         );
-        queue = new ConcurrentLinkedQueue<>();
-
+        this.monitor = monitor;
+        if (this.monitor != Monitor.noop()) {
+            this.logger = this.monitor.logger().slf4j();
+        } else {
+            this.logger = log;
+        }
+        this.queue = new ConcurrentLinkedQueue<>();
+        if (!port.isOpen()) {
+            port.openPort();
+        }
         if (!this.port.addDataListener(this)) {
             throw new IllegalStateException("do not set listener to port");
         }
+    }
+
+    @Override
+    public String getPath() {
+        return port.getSystemPortPath();
     }
 
     @Override
@@ -135,7 +170,10 @@ public class DefaultSerialPortClient implements
                 }
                 if (PENDING.compareAndSet(this, null, request)) {
                     //独立线程发起请求,防止阻塞请求线程
-                    scheduler.schedule(request::sendRequest);
+                    scheduler.schedule(
+                        request::sendRequest,
+                        config.getCommunicationInterval().toNanos(),
+                        TimeUnit.NANOSECONDS);
                 } else {
                     queue.add(request);
                 }
@@ -147,7 +185,7 @@ public class DefaultSerialPortClient implements
 
     @Override
     public void catchException(Exception e) {
-        log.error("handle serial port payload error", e);
+        logger.error("handle serial port payload error", e);
         if (pending != null && !pending.isDisposed()) {
             pending.sink.error(new IllegalStateException("error.handle_serial_port_error", e));
         }
@@ -165,23 +203,32 @@ public class DefaultSerialPortClient implements
             dispose();
             return;
         }
-        if (event.getEventType() != SerialPort.LISTENING_EVENT_DATA_RECEIVED) {
-            return;
+        if (event.getEventType() == SerialPort.LISTENING_EVENT_DATA_RECEIVED) {
+            // 监控
+            monitor
+                .metrics()
+                .count(CollectorConstants.Metrics.received, event.getReceivedData().length);
+
+            if (logger.isInfoEnabled()) {
+                logger.info("received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
+            }
+
+            PendingRequest pending = PENDING.get(this);
+            if (pending == null || pending.isDisposed()) {
+                logger.warn("request is canceled! received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
+                return;
+            }
+            parser.handle(Unpooled.wrappedBuffer(event.getReceivedData()));
         }
 
-        PendingRequest pending = PENDING.get(this);
-        if (pending == null || pending.isDisposed()) {
-            return;
-        }
-        parser.handle(Unpooled.wrappedBuffer(event.getReceivedData()));
     }
 
     private void handleBuffer(ByteBuf buffer) {
         PendingRequest pending = PENDING.get(this);
-        if (log.isDebugEnabled()) {
-            log.debug("received SerialPort [{}] data :{}",
-                      port.getSystemPortPath(),
-                      ByteBufUtil.hexDump(buffer));
+        if (logger.isDebugEnabled()) {
+            logger.debug("received SerialPort [{}] data :{}",
+                         port.getSystemPortPath(),
+                         ByteBufUtil.hexDump(buffer));
         }
         if (pending != null) {
 
@@ -195,18 +242,26 @@ public class DefaultSerialPortClient implements
     @Override
     public void dispose() {
         disposable.dispose();
-        port.closePort();
+        try {
+            port.closePort();
+        } catch (Throwable ignore) {
 
-        if (pending != null) {
+        }
+        PendingRequest pending = PENDING.getAndSet(this, null);
+        if (pending != null && !pending.isCancelled()) {
             pending.sink.error(new IllegalStateException("port closed"));
         }
-        PendingRequest pending = this.pending;
-        while (pending != null) {
-            if (!pending.isCancelled()) {
-                pending.sink.error(new IllegalStateException("port closed"));
-            }
+        for (; ; ) {
             pending = queue.poll();
+            if (pending == null) {
+                break;
+            }
+            if (pending.isCancelled()) {
+                continue;
+            }
+            pending.sink.error(new IllegalStateException("port closed"));
         }
+
     }
 
     @Override
@@ -249,6 +304,7 @@ public class DefaultSerialPortClient implements
         private void sendRequest() {
             try {
                 byte[] payload = ByteBufUtil.getBytes(request);
+
                 if (logger.isDebugEnabled()) {
                     logger.debug("request SerialPort [{}] data:{}",
                                  port.getSystemPortPath(),
@@ -260,19 +316,21 @@ public class DefaultSerialPortClient implements
                                 port.getSystemPortPath(),
                                 ByteBufUtil.hexDump(payload));
                 }
-                //请求超时处理
-                scheduler.schedule(
-                    () -> {
-                        //超时未获取到数据,重置粘拆包处理器.
-                        if (!isDisposed()) {
-                            parser.reset();
-                        }
-                        sink.complete();
-                    },
-                    requestTimeout.toMillis(),
-                    TimeUnit.MILLISECONDS);
+                if (!isDisposed()) {
+                    //请求超时处理
+                    scheduler.schedule(
+                        () -> {
+                            //超时未获取到数据,重置粘拆包处理器.
+                            if (!isDisposed()) {
+                                parser.reset();
+                            }
+                            sink.error(new RequestTimeoutException());
+                        },
+                        requestTimeout.toMillis(),
+                        TimeUnit.MILLISECONDS);
+                }
             } catch (Throwable e) {
-                logger.error("write SerialPort [{}] failed {}",  port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
+                logger.error("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.error(new IllegalStateException("error.serial_port_error", e));
             }
         }

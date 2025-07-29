@@ -13,8 +13,14 @@ public interface CollectorConstants {
     interface Metrics{
         String complete = "complete";
         String collect = "collect";
-
         String pending = "pending";
+
+        // 接收流量
+        String received = "received";
+        // 发送流量
+        String sent  = "sent";
+        // 错误
+        String error = "error";
     }
 
     interface Headers {
@@ -80,6 +86,8 @@ public interface CollectorConstants {
         int collectorConfigError = 20002;
         // 采集器已熔断
         int collectorCircuitBreakerClosed = 20100;
+        // 采集超时
+        int collectTimeout = 20200;
 
         int pointError = 30000;
         // 配置错误
