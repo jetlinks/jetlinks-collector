@@ -329,7 +329,7 @@ public class DefaultSerialPortClient implements
                             if (!isDisposed()) {
                                 parser.reset();
                             }
-                            sink.error(new RequestTimeoutException());
+                            sink.error(new RequestTimeoutException(getPath()));
                         },
                         requestTimeout.toMillis(),
                         TimeUnit.MILLISECONDS);
