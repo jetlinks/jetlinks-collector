@@ -124,11 +124,16 @@ public class DefaultSerialPortClient implements
     }
 
     @Override
+    public boolean isConnected() {
+        return port.isOpen();
+    }
+
+    @Override
     public Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout) {
         return Flux
             .<ByteBuf>create(sink -> {
                 if (!port.isOpen() || isDisposed()) {
-                    sink.error(new IllegalStateException());
+                    sink.error(new PortClosedException(getPath()));
                     return;
                 }
                 PendingRequest request = new PendingRequest(buf, sink, timeout);
@@ -249,7 +254,7 @@ public class DefaultSerialPortClient implements
         }
         PendingRequest pending = PENDING.getAndSet(this, null);
         if (pending != null && !pending.isCancelled()) {
-            pending.sink.error(new IllegalStateException("port closed"));
+            pending.sink.error(new PortClosedException(getPath()));
         }
         for (; ; ) {
             pending = queue.poll();
@@ -259,7 +264,7 @@ public class DefaultSerialPortClient implements
             if (pending.isCancelled()) {
                 continue;
             }
-            pending.sink.error(new IllegalStateException("port closed"));
+            pending.sink.error(new PortClosedException(getPath()));
         }
 
     }
@@ -334,5 +339,10 @@ public class DefaultSerialPortClient implements
                 sink.error(new IllegalStateException("error.serial_port_error", e));
             }
         }
+    }
+
+    @Override
+    public void doOnClosed(Disposable disposable) {
+        this.disposable.add(disposable);
     }
 }

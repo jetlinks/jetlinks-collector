@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
+import org.hswebframework.web.validator.ValidatorUtils;
 
 import java.time.Duration;
 import java.util.function.Consumer;
@@ -18,27 +19,31 @@ import java.util.function.Consumer;
 @Setter
 public class SerialPortConfig {
 
-    @Schema(description = "串口号")
+    @Schema(title = "串口号")
     @NotBlank
     private String port;
 
-    @Schema(description = "波特率")
+    @Schema(title = "波特率")
     private int baudRate = 9600;
 
-    @Schema(description = "数据位")
+    @Schema(title = "数据位")
     private int dataBits = 8;
 
-    @Schema(description = "停止位")
+    @Schema(title = "停止位")
     private SerialPortStopBits stopBits = SerialPortStopBits.ONE;
 
-    @Schema(description = "校验位")
+    @Schema(title = "校验位")
     private SerialPortParity parity = SerialPortParity.NONE;
 
+    @Schema(title = "RS485配置")
     private Rs485 rs485 = new Rs485();
 
     //Rtu通讯间隔时间（两个请求之间的间隔时间，以适应性能不佳的设备）
     private Duration communicationInterval = Duration.ZERO;
 
+    public void validate(){
+        ValidatorUtils.tryValidate(this);
+    }
 
     public SerialPort create() {
         SerialPort serialPort = SerialPort.getCommPort(port);

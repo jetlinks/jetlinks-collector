@@ -26,6 +26,10 @@ import java.util.function.Function;
  */
 public interface SerialPortClient extends Disposable {
 
+    /**
+     * 获取串口地址
+     * @return 串口地址
+     */
     String getPath();
 
     /**
@@ -57,6 +61,15 @@ public interface SerialPortClient extends Disposable {
      * @return 响应数据
      */
     Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout, int num);
+
+    /**
+     * @return 是否已连接
+     */
+    default boolean isConnected(){
+        return !isDisposed();
+    }
+
+    void doOnClosed(Disposable disposable);
 
     /**
      * 基于已经打开的串口创建客户端,在收到串口数据后,会根据{@link PayloadParser}的规则解析出完整报文后返回给发起方.
