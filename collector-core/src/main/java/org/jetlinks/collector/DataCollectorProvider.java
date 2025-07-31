@@ -4,7 +4,8 @@ import org.jetlinks.collector.command.GetChannelConfigMetadataCommand;
 import org.jetlinks.collector.command.GetCollectorConfigMetadataCommand;
 import org.jetlinks.collector.command.GetPointConfigMetadataCommand;
 import org.jetlinks.collector.discovery.DiscoveryPointCommand;
-import org.jetlinks.collector.subscribe.PointSubscriber;
+import org.jetlinks.collector.subscribe.PointListener;
+import org.jetlinks.collector.subscribe.PointSubscription;
 import org.jetlinks.core.Wrapper;
 import org.jetlinks.core.command.Command;
 import org.jetlinks.core.command.CommandSupport;
@@ -16,6 +17,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import javax.annotation.Nonnull;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -96,6 +98,12 @@ public interface DataCollectorProvider extends CommandSupport {
          */
         Monitor monitor();
 
+        /**
+         * 获取通道下的所有采集器
+         *
+         * @return 采集器运行时
+         */
+        Flux<CollectorRuntime> collectors();
     }
 
     interface CollectorConfiguration {
@@ -120,6 +128,22 @@ public interface DataCollectorProvider extends CommandSupport {
          * @return 通道运行时
          */
         ChannelRuntime channel();
+
+        /**
+         * 获取采集器下所有的点位运行时
+         *
+         * @return 点位
+         */
+        Flux<PointRuntime> points();
+
+        /**
+         * 获取采集器下的点位运行时
+         *
+         * @param id 点位ID
+         * @return 点位
+         * @see PointRuntime#getId()
+         */
+        Mono<PointRuntime> point(String id);
     }
 
     interface PointConfiguration {
@@ -202,17 +226,18 @@ public interface DataCollectorProvider extends CommandSupport {
         <R> R execute(@Nonnull Command<R> command);
 
         /**
-         * 订阅点位数据.如果不支持则返回{@link Disposables#disposed()}.
-         * <p>
-         * 调用返回值{@link Disposable#dispose()}取消订阅.
-         * <p>
-         * 当点位产生数据时,调用监听器{@link Consumer#accept(Object)}方法.
+         * 创建订阅,用于订阅点位数据等.
          *
-         * @return Disposable
+         * @param listener 点位监听器
+         * @return 订阅
          * @see AccessMode#subscribe
+         * @see PointSubscription#subscribe(Collection)
+         * @see PointSubscription#unsubscribe(Collection)
+         * @see PointSubscription#subscribed(String)
          */
-        Disposable subscribe(PointRuntime point,
-                             PointSubscriber subscriber);
+        default PointSubscription createSubscription(PointListener listener) {
+            return PointSubscription.unsupported();
+        }
 
         /**
          * 采集指定的点位数据. 用于主动获取点位数据，如定时获取等.

@@ -10,6 +10,7 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -39,8 +40,12 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
     private int code;
 
 
-    public Result<T> withPointId(String pointId){
+    public Result<T> withPointId(String pointId) {
         return addHeader(CollectorConstants.Headers.pointId, pointId);
+    }
+
+    public Result<T> withReason(String reason){
+        return addHeader(CollectorConstants.Headers.reason, reason);
     }
 
     public static Result<Void> success() {
@@ -88,5 +93,13 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
 
         success = in.readBoolean();
         code = in.readInt();
+    }
+
+    @Override
+    public String toString() {
+        if (success) {
+            return "success," + data;
+        }
+        return "error,headers:" + Objects.toString(getHeaders(), "failed");
     }
 }

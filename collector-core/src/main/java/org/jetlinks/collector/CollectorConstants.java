@@ -26,6 +26,7 @@ public interface CollectorConstants {
     interface Headers {
 
         HeaderKey<String> pointId = HeaderKey.of("pointId", null, String.class);
+        HeaderKey<String> reason = HeaderKey.of("reason", null, String.class);
 
     }
 
@@ -33,7 +34,9 @@ public interface CollectorConstants {
     @Getter
     enum CollectorFeatures implements Feature {
         subscribable("可订阅点位数据"),
-        batchSupport("支持批量采集");
+        batchSupport("支持批量采集"),
+        // 支持自动编解码,平台无需配置编解码规则.
+        autoCodec("自动编解码");
         final String name;
 
         @Override
@@ -80,6 +83,7 @@ public interface CollectorConstants {
         int channelConfigError = 10002;
 
         int collectorError = 20000;
+
         // 通信错误
         int collectorCommunicationError = 20001;
         // 配置错误
@@ -98,8 +102,10 @@ public interface CollectorConstants {
         int pointUnsupportedRead = 30004;
         // 不支持写
         int pointUnsupportedWrite = 30005;
+        // 点位不存在
+        int pointNotFound = 30006;
 
-
+        int pointOperationRejected = 30007;
     }
 
 
