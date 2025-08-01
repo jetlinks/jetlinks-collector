@@ -10,7 +10,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class AbstractPointSubscription<P extends DataCollectorProvider.PointRuntime,
@@ -79,16 +81,22 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
             });
     }
 
-    @Override
-    public final void subscribe(Collection<String> points) {
-        @SuppressWarnings("all")
-        Disposable subscribed = Flux
+    protected final Mono<Void> subscribeAsync(Collection<String> points) {
+        return Flux
             .fromIterable(points)
             .filter(s -> !containsKey(s))
             .flatMap(this::getPointRuntime)
             .map(this::createSubscribing)
             .buffer(getBufferSize())
             .concatMap(this::subscribe0)
+            .then();
+    }
+
+    @Override
+    public final void subscribe(Collection<String> points) {
+        @SuppressWarnings("all")
+        Disposable ignore = this
+            .subscribeAsync(points)
             .subscribe(
                 null,
                 error -> {
@@ -101,12 +109,20 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
                 });
     }
 
-    @Override
-    public final void unsubscribe(Collection<String> pointId) {
-        Flux.fromIterable(pointId)
+
+    protected Mono<Void> unsubscribeAsync(Collection<String> pointId) {
+        return Flux
+            .fromIterable(pointId)
             .mapNotNull(this::remove)
             .buffer(getBufferSize())
             .concatMap(this::unsubscribe0)
+            .then();
+    }
+
+    @Override
+    public final void unsubscribe(Collection<String> pointId) {
+        @SuppressWarnings("all")
+        Disposable ignore = unsubscribeAsync(pointId)
             .subscribe(
                 null,
                 error -> {
@@ -118,7 +134,18 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
 
     @Override
     public final void reload() {
-        subscribe(keySet());
+        Set<String> id = new HashSet<>(keySet());
+        @SuppressWarnings("all")
+        Disposable ignore = unsubscribeAsync(id)
+            .then(subscribeAsync(id))
+            .subscribe(
+                null,
+                error -> {
+                    monitor()
+                        .logger()
+                        .warn("reload points failed", error);
+                });
+
     }
 
     protected abstract void doDispose();
