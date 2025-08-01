@@ -40,6 +40,9 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     }
 
     private Mono<Void> unsubscribe0(List<S> subscribing) {
+        monitor()
+            .logger()
+            .debug("unsubscribe points : {}", subscribing);
         return this
             .unsubscribe(subscribing)
             .onErrorResume(err -> {
@@ -56,19 +59,21 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     }
 
     private Mono<Void> subscribe0(List<S> subscribing) {
+        for (S s : subscribing) {
+            put(s.point.getId(), s);
+        }
+        monitor()
+            .logger()
+            .debug("subscribe points : {}", subscribing);
         return this
             .subscribe(subscribing)
-            .<Void>then(Mono.fromRunnable(() -> {
-                for (S s : subscribing) {
-                    put(s.point.getId(), s);
-                }
-            }))
             .onErrorResume(err -> {
                 monitor()
                     .logger()
                     .warn("subscribe points failed", err);
                 for (S s : subscribing) {
                     listener.onSubscribeFailed(s.point.getId(), err);
+                    remove(s.point.getId(), s);
                 }
                 return Mono.empty();
             });
@@ -76,10 +81,10 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
 
     @Override
     public final void subscribe(Collection<String> points) {
-
         @SuppressWarnings("all")
         Disposable subscribed = Flux
             .fromIterable(points)
+            .filter(s -> !containsKey(s))
             .flatMap(this::getPointRuntime)
             .map(this::createSubscribing)
             .buffer(getBufferSize())
@@ -99,7 +104,7 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     @Override
     public final void unsubscribe(Collection<String> pointId) {
         Flux.fromIterable(pointId)
-            .mapNotNull(this::get)
+            .mapNotNull(this::remove)
             .buffer(getBufferSize())
             .concatMap(this::unsubscribe0)
             .subscribe(
@@ -113,7 +118,7 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
 
     @Override
     public final void reload() {
-          subscribe(keySet());
+        subscribe(keySet());
     }
 
     protected abstract void doDispose();
@@ -121,7 +126,7 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     @Override
     public final boolean subscribed(String pointId) {
         S s = get(pointId);
-        return s != null && s.subscribed;
+        return s != null && s.isSubscribed();
     }
 
 
@@ -139,6 +144,14 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     @Getter
     public static class SubscribingPoint<P extends DataCollectorProvider.PointRuntime> {
         protected final P point;
-        boolean subscribed;
+
+        @Override
+        public String toString() {
+            return point.toString();
+        }
+
+        public boolean isSubscribed() {
+            return true;
+        }
     }
 }

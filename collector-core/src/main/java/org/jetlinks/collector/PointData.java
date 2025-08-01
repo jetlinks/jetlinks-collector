@@ -61,7 +61,9 @@ public class PointData implements Externalizable {
 
     @Override
     public String toString() {
-        String val = parsedData == null ? Hex.encodeHexString(originData) : String.valueOf(parsedData);
+        String val = parsedData == null
+            ? Hex.encodeHexString(originData)
+            : String.valueOf(parsedData);
         return state==null?val:(val + ":" + state);
     }
 

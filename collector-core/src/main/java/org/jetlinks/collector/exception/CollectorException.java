@@ -7,12 +7,12 @@ import org.hswebframework.web.exception.I18nSupportException;
 public class CollectorException extends I18nSupportException.NoStackTrace {
 
     private final String collectorId;
-    private final int code;
+    private final long code;
 
     public CollectorException(String collectorId,
                               String messageOrI18nCode,
                               Throwable cause,
-                              int code,
+                              long code,
                               Object... args) {
         super(messageOrI18nCode, cause, args);
         this.collectorId = collectorId;

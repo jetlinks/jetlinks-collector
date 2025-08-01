@@ -8,9 +8,7 @@ import org.jetlinks.core.metadata.Feature;
 
 public interface CollectorConstants {
 
-
-
-    interface Metrics{
+    interface Metrics {
         String complete = "complete";
         String collect = "collect";
         String pending = "pending";
@@ -18,7 +16,7 @@ public interface CollectorConstants {
         // 接收流量
         String received = "received";
         // 发送流量
-        String sent  = "sent";
+        String sent = "sent";
         // 错误
         String error = "error";
     }
@@ -70,44 +68,6 @@ public interface CollectorConstants {
         }
 
     }
-
-
-    interface Codes {
-        // 成功
-        int success = 0;
-
-        int channelError = 10000;
-        // 通信错误
-        int channelCommunicationError = 1000;
-        // 配置错误
-        int channelConfigError = 10002;
-
-        int collectorError = 20000;
-
-        // 通信错误
-        int collectorCommunicationError = 20001;
-        // 配置错误
-        int collectorConfigError = 20002;
-        // 采集器已熔断
-        int collectorCircuitBreakerClosed = 20100;
-        // 采集超时
-        int collectTimeout = 20200;
-
-        int pointError = 30000;
-        // 配置错误
-        int pointConfigError = 30001;
-        // 编解码错误
-        int pointCodecError = 30002;
-        // 不支持读
-        int pointUnsupportedRead = 30004;
-        // 不支持写
-        int pointUnsupportedWrite = 30005;
-        // 点位不存在
-        int pointNotFound = 30006;
-
-        int pointOperationRejected = 30007;
-    }
-
 
     interface Tracer {
         CharSequence decode = "decode";

@@ -1,5 +1,6 @@
 package org.jetlinks.collector.subscribe;
 
+import lombok.Getter;
 import org.jetlinks.collector.DataCollectorProvider;
 import org.jetlinks.collector.PointData;
 import org.jetlinks.collector.Result;
@@ -31,17 +32,17 @@ import static org.mockito.Mockito.*;
 
 /**
  * AbstractPointSubscription 单元测试
- * 
+ *
  * @author zhouhao
  */
 class AbstractPointSubscriptionTest {
 
     @Mock
     private PointListener mockListener;
-    
+
     @Mock
     private Monitor mockMonitor;
-    
+
     private TestPointSubscription subscription;
 
     @BeforeEach
@@ -65,13 +66,13 @@ class AbstractPointSubscriptionTest {
         String pointId = "test-point-1";
         TestPointRuntime runtime = new TestPointRuntime(pointId);
         subscription.addMockRuntime(pointId, runtime);
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(1);
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
-        
+
         // 执行订阅
         subscription.subscribe(Collections.singletonList(pointId));
-        
+
         // 验证订阅完成
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
         assertTrue(subscription.subscribed(pointId));
@@ -86,13 +87,13 @@ class AbstractPointSubscriptionTest {
         for (String pointId : pointIds) {
             subscription.addMockRuntime(pointId, new TestPointRuntime(pointId));
         }
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(pointIds.size());
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
-        
+
         // 执行订阅
         subscription.subscribe(pointIds);
-        
+
         // 验证所有点位都已订阅
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
         for (String pointId : pointIds) {
@@ -107,17 +108,17 @@ class AbstractPointSubscriptionTest {
         String pointId = "test-point-1";
         TestPointRuntime runtime = new TestPointRuntime(pointId);
         subscription.addMockRuntime(pointId, runtime);
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(1);
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
         subscription.subscribe(Collections.singletonList(pointId));
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
-        
+
         // 执行取消订阅
         CountDownLatch unsubscribeLatch = new CountDownLatch(1);
         subscription.setUnsubscribeCallback(() -> unsubscribeLatch.countDown());
         subscription.unsubscribe(Collections.singletonList(pointId));
-        
+
         // 验证取消订阅完成
         assertTrue(unsubscribeLatch.await(5, TimeUnit.SECONDS));
         assertFalse(subscription.subscribed(pointId));
@@ -132,17 +133,17 @@ class AbstractPointSubscriptionTest {
         for (String pointId : pointIds) {
             subscription.addMockRuntime(pointId, new TestPointRuntime(pointId));
         }
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(pointIds.size());
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
         subscription.subscribe(pointIds);
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
-        
+
         // 执行取消订阅
         CountDownLatch unsubscribeLatch = new CountDownLatch(pointIds.size());
         subscription.setUnsubscribeCallback(() -> unsubscribeLatch.countDown());
         subscription.unsubscribe(pointIds);
-        
+
         // 验证所有点位都已取消订阅
         assertTrue(unsubscribeLatch.await(5, TimeUnit.SECONDS));
         for (String pointId : pointIds) {
@@ -158,17 +159,17 @@ class AbstractPointSubscriptionTest {
         for (String pointId : pointIds) {
             subscription.addMockRuntime(pointId, new TestPointRuntime(pointId));
         }
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(pointIds.size());
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
         subscription.subscribe(pointIds);
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
-        
+
         // 执行重新加载
         CountDownLatch reloadLatch = new CountDownLatch(pointIds.size());
         subscription.setSubscribeCallback(() -> reloadLatch.countDown());
         subscription.reload();
-        
+
         // 验证重新加载完成
         assertTrue(reloadLatch.await(5, TimeUnit.SECONDS));
         for (String pointId : pointIds) {
@@ -181,16 +182,16 @@ class AbstractPointSubscriptionTest {
         String pointId = "error-point";
         subscription.addMockRuntime(pointId, new TestPointRuntime(pointId));
         subscription.setSubscribeError(new RuntimeException("订阅失败"));
-        
+
         CountDownLatch errorLatch = new CountDownLatch(1);
         doAnswer(invocation -> {
             errorLatch.countDown();
             return null;
         }).when(mockListener).onSubscribeFailed(eq(pointId), any(Throwable.class));
-        
+
         // 执行订阅
         subscription.subscribe(Collections.singletonList(pointId));
-        
+
         // 验证错误处理
         assertTrue(errorLatch.await(5, TimeUnit.SECONDS));
         assertFalse(subscription.subscribed(pointId));
@@ -205,21 +206,21 @@ class AbstractPointSubscriptionTest {
         String pointId = "test-point";
         TestPointRuntime runtime = new TestPointRuntime(pointId);
         subscription.addMockRuntime(pointId, runtime);
-        
+
         CountDownLatch subscribeLatch = new CountDownLatch(1);
         subscription.setSubscribeCallback(() -> subscribeLatch.countDown());
         subscription.subscribe(Collections.singletonList(pointId));
         assertTrue(subscribeLatch.await(5, TimeUnit.SECONDS));
-        
+
         // 设置取消订阅错误
         subscription.setUnsubscribeError(new RuntimeException("取消订阅失败"));
-        
+
         // 执行取消订阅
         subscription.unsubscribe(Collections.singletonList(pointId));
-        
+
         // 稍等一下让错误处理完成
         Thread.sleep(1000);
-        
+
         // 验证错误处理，但点位仍然被移除
         // 验证监控器的logger方法被调用
         verify(subscription.monitor(), atLeastOnce()).logger();
@@ -229,27 +230,27 @@ class AbstractPointSubscriptionTest {
     @Test
     void testGetPointRuntimeNotFound() {
         String pointId = "non-existent-point";
-        
+
         StepVerifier.create(subscription.getPointRuntime(pointId))
                 .verifyComplete();
-        
+
         // 验证订阅不存在的点位
         subscription.subscribe(Collections.singletonList(pointId));
-        
+
         // 稍等一下让处理完成
         try {
             Thread.sleep(500);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        
+
         assertFalse(subscription.subscribed(pointId));
     }
 
     @Test
     void testBufferSize() {
         assertEquals(50, subscription.getBufferSize());
-        
+
         // 测试自定义缓冲区大小
         TestPointSubscription customSubscription = new TestPointSubscription(mockListener) {
             @Override
@@ -268,25 +269,25 @@ class AbstractPointSubscriptionTest {
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch doneLatch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger(0);
-        
+
         // 准备测试数据
         for (int i = 0; i < threadCount * pointsPerThread; i++) {
             String pointId = "point-" + i;
             subscription.addMockRuntime(pointId, new TestPointRuntime(pointId));
         }
-        
+
         // 创建多个线程同时进行订阅操作
         for (int i = 0; i < threadCount; i++) {
             final int threadIndex = i;
             new Thread(() -> {
                 try {
                     startLatch.await();
-                    
+
                     List<String> pointIds = new ArrayList<>();
                     for (int j = 0; j < pointsPerThread; j++) {
                         pointIds.add("point-" + (threadIndex * pointsPerThread + j));
                     }
-                    
+
                     subscription.subscribe(pointIds);
                     successCount.incrementAndGet();
                 } catch (Exception e) {
@@ -296,14 +297,14 @@ class AbstractPointSubscriptionTest {
                 }
             }).start();
         }
-        
+
         // 启动所有线程
         startLatch.countDown();
-        
+
         // 等待所有线程完成
         assertTrue(doneLatch.await(30, TimeUnit.SECONDS));
         assertEquals(threadCount, successCount.get());
-        
+
         // 验证所有点位都被正确订阅
         Thread.sleep(2000); // 等待订阅操作完成
         assertEquals(threadCount * pointsPerThread, subscription.size());
@@ -312,9 +313,9 @@ class AbstractPointSubscriptionTest {
     @Test
     void testDispose() {
         assertFalse(subscription.isDisposed());
-        
+
         subscription.dispose();
-        
+
         assertTrue(subscription.isDisposed());
         assertTrue(subscription.disposed);
     }
@@ -323,10 +324,10 @@ class AbstractPointSubscriptionTest {
     void testSubscribingPointClass() {
         TestPointRuntime runtime = new TestPointRuntime("test-point");
         TestSubscribingPoint subscribingPoint = new TestSubscribingPoint(runtime);
-        
+
         assertEquals(runtime, subscribingPoint.getPoint());
         assertFalse(subscribingPoint.subscribed);
-        
+
         subscribingPoint.subscribed = true;
         assertTrue(subscribingPoint.subscribed);
     }
@@ -343,7 +344,7 @@ class AbstractPointSubscriptionTest {
      * 测试用的 AbstractPointSubscription 实现类
      */
     private static class TestPointSubscription extends AbstractPointSubscription<TestPointRuntime, TestSubscribingPoint> {
-        
+
         private final Map<String, TestPointRuntime> mockRuntimes = new HashMap<>();
         private final Monitor monitor;
         private RuntimeException subscribeError;
@@ -384,7 +385,7 @@ class AbstractPointSubscriptionTest {
             if (subscribeError != null) {
                 return Mono.error(subscribeError);
             }
-            
+
             return Mono.fromRunnable(() -> {
                 for (TestSubscribingPoint point : subscribing) {
                     point.subscribed = true;
@@ -400,7 +401,7 @@ class AbstractPointSubscriptionTest {
             if (unsubscribeError != null) {
                 return Mono.error(unsubscribeError);
             }
-            
+
             return Mono.fromRunnable(() -> {
                 for (TestSubscribingPoint point : subscribing) {
                     point.subscribed = false;
@@ -415,24 +416,24 @@ class AbstractPointSubscriptionTest {
         protected void doDispose() {
             disposed = true;
         }
-        
+
         // 测试辅助方法
         public void addMockRuntime(String id, TestPointRuntime runtime) {
             mockRuntimes.put(id, runtime);
         }
-        
+
         public void setSubscribeError(RuntimeException error) {
             this.subscribeError = error;
         }
-        
+
         public void setUnsubscribeError(RuntimeException error) {
             this.unsubscribeError = error;
         }
-        
+
         public void setSubscribeCallback(Runnable callback) {
             this.subscribeCallback = callback;
         }
-        
+
         public void setUnsubscribeCallback(Runnable callback) {
             this.unsubscribeCallback = callback;
         }
@@ -509,7 +510,10 @@ class AbstractPointSubscriptionTest {
     /**
      * 测试用的 SubscribingPoint 实现类
      */
+    @Getter
     private static class TestSubscribingPoint extends AbstractPointSubscription.SubscribingPoint<TestPointRuntime> {
+        boolean subscribed;
+
         public TestSubscribingPoint(TestPointRuntime point) {
             super(point);
         }

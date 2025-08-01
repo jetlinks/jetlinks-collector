@@ -33,18 +33,39 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
     private boolean success;
 
     /**
-     * 状态码
+     * 状态码，支持组合错误码
      *
-     * @see CollectorConstants.Codes
+     * @see InternalStatusCode
      */
-    private int code;
+    private long code;
 
+    /**
+     * 设置组合错误码
+     *
+     * @param code 错误码枚举数组，支持多个错误码组合
+     * @return 当前Result实例
+     */
+    public Result<T> withCode(StatusCode code) {
+        this.code = code.getCode();
+        return this;
+    }
+
+    /**
+     * 设置错误码
+     *
+     * @param code 错误码
+     * @return 当前Result实例
+     */
+    public Result<T> withCode(long code) {
+        this.code = code;
+        return this;
+    }
 
     public Result<T> withPointId(String pointId) {
         return addHeader(CollectorConstants.Headers.pointId, pointId);
     }
 
-    public Result<T> withReason(String reason){
+    public Result<T> withReason(String reason) {
         return addHeader(CollectorConstants.Headers.reason, reason);
     }
 
@@ -56,23 +77,47 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         Result<T> result = new Result<>();
         result.setSuccess(true);
         result.setData(data);
-        result.setCode(CollectorConstants.Codes.success);
+        result.setCode(InternalStatusCode.Good.getCode());
         return result;
     }
 
-    public static <T> Result<T> error(int code) {
+    public static <T> Result<T> error(long code) {
         Result<T> result = new Result<>();
         result.setSuccess(false);
         result.setCode(code);
         return result;
     }
 
-    public static <T> Result<T> error(int code, Throwable error) {
+    public static <T> Result<T> error(InternalStatusCode code, Throwable error) {
+        return error(code.getCode(), error);
+    }
+
+    public static <T> Result<T> error(long code, Throwable error) {
         Result<T> result = new Result<>();
         result.setSuccess(false);
         result.addHeader("errorType", error.getClass().getCanonicalName());
         result.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
         result.setCode(code);
+        return result;
+    }
+
+    public static <T> Result<T> error(StatusCode codes) {
+        Result<T> result = new Result<>();
+        result.setSuccess(false);
+        result.withCode(codes);
+        return result;
+    }
+
+    public static <T> Result<T> error(Throwable error) {
+        Result<T> result = new Result<>();
+        result.setSuccess(false);
+        result.addHeader("errorType", error.getClass().getCanonicalName());
+        result.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
+
+        // 根据异常类型推断错误码
+        long errorCode = CollectorUtils.inferErrorCode(error);
+        result.setCode(errorCode);
+
         return result;
     }
 
@@ -82,7 +127,7 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
 
         SerializeUtils.writeObject(data, out);
         out.writeBoolean(success);
-        out.writeInt(code);
+        out.writeLong(code);
     }
 
     @Override
@@ -92,7 +137,7 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         data = (T) SerializeUtils.readObject(in);
 
         success = in.readBoolean();
-        code = in.readInt();
+        code = in.readLong();
     }
 
     @Override

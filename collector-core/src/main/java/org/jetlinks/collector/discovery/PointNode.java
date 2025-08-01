@@ -5,7 +5,10 @@ import lombok.Setter;
 import org.jetlinks.collector.AccessMode;
 import org.jetlinks.core.metadata.DataType;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Getter
 @Setter
@@ -42,9 +45,40 @@ public class PointNode {
     private DataType dataType;
 
     /**
+     * 说明
+     */
+    private String description;
+
+    /**
      * 其他配置信息
      */
     private Map<String, Object> others;
+
+
+    private List<PointNode> children;
+
+    @Override
+    public String toString() {
+        StringBuilder builder = new StringBuilder();
+        builder.append(nodeType).append(": ").append(address);
+        if (name != null && !Objects.equals(address, name)) {
+            builder.append(" (").append(name).append(")");
+        }
+        if (accessModes != null && accessModes.length > 0) {
+            builder.append(" ").append(Arrays.toString(accessModes));
+        }
+        if (dataType != null) {
+            builder.append(" ").append(dataType.getId());
+        }
+        if (others != null) {
+            builder.append(" ").append(others);
+        }
+        if (description != null) {
+            builder.append(description);
+        }
+
+        return builder.toString();
+    }
 
     public enum Type {
         // 点位
