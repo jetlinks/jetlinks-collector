@@ -5,6 +5,8 @@ import org.jetlinks.collector.DataCollectorProvider;
 import org.jetlinks.collector.PointData;
 import org.jetlinks.collector.Result;
 import org.jetlinks.collector.Health;
+import org.jetlinks.core.metadata.DataType;
+import org.jetlinks.core.metadata.types.UnknownType;
 import org.jetlinks.core.monitor.Monitor;
 import org.jetlinks.core.monitor.logger.Logger;
 import org.junit.jupiter.api.BeforeEach;
@@ -452,6 +454,11 @@ class AbstractPointSubscriptionTest {
         @Override
         public String getId() {
             return id;
+        }
+
+        @Override
+        public DataType getDataType() {
+            return new UnknownType();
         }
 
         @Override

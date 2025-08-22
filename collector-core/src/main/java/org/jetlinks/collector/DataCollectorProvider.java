@@ -9,10 +9,10 @@ import org.jetlinks.collector.subscribe.PointSubscription;
 import org.jetlinks.core.Wrapper;
 import org.jetlinks.core.command.Command;
 import org.jetlinks.core.command.CommandSupport;
+import org.jetlinks.core.metadata.DataType;
 import org.jetlinks.core.metadata.Feature;
 import org.jetlinks.core.monitor.Monitor;
 import reactor.core.Disposable;
-import reactor.core.Disposables;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -21,7 +21,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * 针对数据采集的支持,用于平台主动采集的场景,如: 定时采集modbus数据等.
@@ -290,6 +289,9 @@ public interface DataCollectorProvider extends CommandSupport {
          * @return 点位ID
          */
         String getId();
+
+
+        DataType getDataType();
 
         /**
          * 测试点位,返回点位健康度.
