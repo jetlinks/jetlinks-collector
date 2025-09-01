@@ -34,7 +34,10 @@ public interface CollectorConstants {
         subscribable("可订阅点位数据"),
         batchSupport("支持批量采集"),
         // 支持自动编解码,平台无需配置编解码规则.
-        autoCodec("自动编解码");
+        autoCodec("自动编解码"),
+        // 否则为通道持有连接
+        holdConnection("持有连接"),
+        ;
         final String name;
 
         @Override

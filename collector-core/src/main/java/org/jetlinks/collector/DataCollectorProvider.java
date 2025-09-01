@@ -299,7 +299,9 @@ public interface DataCollectorProvider extends CommandSupport {
          * @return 测试结果
          * @see Result#getCode()
          */
-        Mono<Result<Health>> test();
+        default Mono<Result<Health>> test() {
+            return Mono.just(Result.success(Health.ok()));
+        }
 
         /**
          * 读取点位数据
