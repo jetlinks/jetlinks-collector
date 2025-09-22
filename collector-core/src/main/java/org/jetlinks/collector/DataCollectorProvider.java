@@ -18,6 +18,7 @@ import reactor.core.publisher.Mono;
 
 import javax.annotation.Nonnull;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -79,6 +80,16 @@ public interface DataCollectorProvider extends CommandSupport {
      * @return 点位运行时
      */
     Mono<PointRuntime> createPoint(PointConfiguration configuration);
+
+    /**
+     * 获取采集器的特性信息
+     *
+     * @return 特性信息
+     * @see org.jetlinks.collector.CollectorConstants.CollectorFeatures
+     */
+    default Set<? extends Feature> getFeatures() {
+        return Set.of(CollectorConstants.CollectorFeatures.batchSupport);
+    }
 
     interface ChannelConfiguration {
 
