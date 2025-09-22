@@ -12,7 +12,6 @@ import org.jetlinks.core.command.CommandSupport;
 import org.jetlinks.core.metadata.Feature;
 import org.jetlinks.core.monitor.Monitor;
 import reactor.core.Disposable;
-import reactor.core.Disposables;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -22,7 +21,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * 针对数据采集的支持,用于平台主动采集的场景,如: 定时采集modbus数据等.
@@ -88,7 +86,7 @@ public interface DataCollectorProvider extends CommandSupport {
      * @see org.jetlinks.collector.CollectorConstants.CollectorFeatures
      */
     default Set<? extends Feature> getFeatures() {
-        return Set.of(CollectorConstants.CollectorFeatures.batchSupport);
+        return Collections.emptySet();
     }
 
     interface ChannelConfiguration {
@@ -266,6 +264,16 @@ public interface DataCollectorProvider extends CommandSupport {
          * @see CollectorConstants.CollectorFeatures
          */
         Set<? extends Feature> getFeatures();
+
+        /**
+         * 将点位配置信息解析出点位元数据,用于描述点位信息.
+         * <p>
+         * 如果配置不全,则返回{@link Mono#empty()}
+         *
+         * @param properties 配置信息
+         * @return 点位信息
+         */
+        Mono<PointMetadata> resolvePointMetadata(PointProperties properties);
 
         /**
          * 判断是否支持特性
