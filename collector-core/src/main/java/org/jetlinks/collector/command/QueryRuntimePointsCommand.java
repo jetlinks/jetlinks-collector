@@ -8,6 +8,10 @@ import reactor.core.publisher.Flux;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * @deprecated {@link org.jetlinks.pro.collector.cmd.point.QueryRuntimePointsCommand}
+ */
+@Deprecated
 @Schema(title = "获取指定采集器点位运行信息")
 public class QueryRuntimePointsCommand extends AbstractConvertCommand<Flux<PointRuntimeInfo>, QueryRuntimePointsCommand> {
 

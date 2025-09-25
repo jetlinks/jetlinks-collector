@@ -10,8 +10,12 @@ import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
 
+/**
+ * @deprecated {@link org.jetlinks.pro.collector.PointRuntimeInfo}
+ */
 @Getter
 @Setter
+@Deprecated
 public class PointRuntimeInfo implements Externalizable {
 
     private String serverId;
