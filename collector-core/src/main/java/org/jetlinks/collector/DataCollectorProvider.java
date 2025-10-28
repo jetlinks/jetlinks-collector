@@ -79,6 +79,8 @@ public interface DataCollectorProvider extends CommandSupport {
      */
     Mono<PointRuntime> createPoint(PointConfiguration configuration);
 
+    MetadataResolver metadataResolver();
+
     /**
      * 获取采集器的特性信息
      *
@@ -87,6 +89,24 @@ public interface DataCollectorProvider extends CommandSupport {
      */
     default Set<? extends Feature> getFeatures() {
         return Collections.emptySet();
+    }
+
+
+    /**
+     * 元数据解析器,用于根据配置解析出点位相关元数据.
+     */
+    interface MetadataResolver {
+
+        /**
+         * 将点位配置信息解析出点位元数据,用于描述点位信息.
+         * <p>
+         * 如果配置不全,则返回{@link Mono#empty()}
+         *
+         * @param properties 配置信息
+         * @return 点位信息
+         */
+        Mono<PointMetadata> resolvePointMetadata(PointProperties properties);
+
     }
 
     interface ChannelConfiguration {

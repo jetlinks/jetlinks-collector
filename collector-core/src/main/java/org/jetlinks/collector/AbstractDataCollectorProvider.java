@@ -14,11 +14,22 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 @AllArgsConstructor
-public abstract class AbstractDataCollectorProvider extends AnnotationCommandSupport implements DataCollectorProvider {
+public abstract class AbstractDataCollectorProvider extends AnnotationCommandSupport implements DataCollectorProvider ,
+    DataCollectorProvider.MetadataResolver {
     protected final Class<?> channelConfigType;
     protected final Class<?> collectorConfigType;
     protected final Class<?> pointConfigType;
 
+
+    @Override
+    public MetadataResolver metadataResolver() {
+        return this;
+    }
+
+    @Override
+    public Mono<PointMetadata> resolvePointMetadata(PointProperties properties) {
+        return Mono.empty();
+    }
 
     @CommandHandler
     public Mono<List<PropertyMetadata>> getChannelConfigProperties(GetChannelConfigMetadataCommand command) {
