@@ -1,6 +1,8 @@
 package org.jetlinks.collector;
 
+import io.netty.buffer.ByteBufAllocator;
 import lombok.AllArgsConstructor;
+import org.jetlinks.collector.command.GetEditorResourceCommand;
 import org.jetlinks.core.annotation.command.CommandHandler;
 import org.jetlinks.collector.command.GetChannelConfigMetadataCommand;
 import org.jetlinks.collector.command.GetCollectorConfigMetadataCommand;
@@ -9,12 +11,17 @@ import org.jetlinks.core.command.CommandMetadataResolver;
 import org.jetlinks.core.metadata.PropertyMetadata;
 import org.jetlinks.supports.command.AnnotationCommandSupport;
 import org.springframework.core.ResolvableType;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.NettyDataBufferFactory;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
 
 @AllArgsConstructor
-public abstract class AbstractDataCollectorProvider extends AnnotationCommandSupport implements DataCollectorProvider ,
+public abstract class AbstractDataCollectorProvider extends AnnotationCommandSupport implements DataCollectorProvider,
     DataCollectorProvider.MetadataResolver {
     protected final Class<?> channelConfigType;
     protected final Class<?> collectorConfigType;
@@ -29,6 +36,23 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
     @Override
     public Mono<PointMetadata> resolvePointMetadata(PointProperties properties) {
         return Mono.empty();
+    }
+
+    protected Flux<DataBuffer> getEditorResource(String path, String provider, Class<?> clazz) {
+        // 获取默认静态资源
+        // /resources/{provider}/{path}
+        if (!path.startsWith("/")) {
+            path = "/" + path;
+        }
+        return DataBufferUtils
+            .read(new ClassPathResource(provider + path, clazz.getClassLoader()),
+                  new NettyDataBufferFactory(ByteBufAllocator.DEFAULT),
+                  4096);
+    }
+
+    @CommandHandler
+    public Flux<DataBuffer> getEditorResource(GetEditorResourceCommand command) {
+        return getEditorResource(command.getPath(), getId(), this.getClass());
     }
 
     @CommandHandler
