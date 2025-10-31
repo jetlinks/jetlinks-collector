@@ -52,7 +52,7 @@ public interface CollectorConstants {
 
     @AllArgsConstructor
     @Getter
-    enum States implements DataCollectorProvider.State, I18nEnumDict<String> {
+    enum States implements State, I18nEnumDict<String> {
 
         initializing("初始化"),
         running("运行中"),

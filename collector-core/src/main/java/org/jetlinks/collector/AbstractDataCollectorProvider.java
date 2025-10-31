@@ -3,6 +3,7 @@ package org.jetlinks.collector;
 import io.netty.buffer.ByteBufAllocator;
 import lombok.AllArgsConstructor;
 import org.jetlinks.collector.command.GetEditorResourceCommand;
+import org.jetlinks.collector.metadata.MetadataResolver;
 import org.jetlinks.core.annotation.command.CommandHandler;
 import org.jetlinks.collector.command.GetChannelConfigMetadataCommand;
 import org.jetlinks.collector.command.GetCollectorConfigMetadataCommand;
@@ -22,7 +23,7 @@ import java.util.List;
 
 @AllArgsConstructor
 public abstract class AbstractDataCollectorProvider extends AnnotationCommandSupport implements DataCollectorProvider,
-    DataCollectorProvider.MetadataResolver {
+    MetadataResolver {
     protected final Class<?> channelConfigType;
     protected final Class<?> collectorConfigType;
     protected final Class<?> pointConfigType;

@@ -1,10 +1,7 @@
 package org.jetlinks.collector.subscribe;
 
 import lombok.Getter;
-import org.jetlinks.collector.DataCollectorProvider;
-import org.jetlinks.collector.PointData;
-import org.jetlinks.collector.Result;
-import org.jetlinks.collector.Health;
+import org.jetlinks.collector.*;
 import org.jetlinks.core.monitor.Monitor;
 import org.jetlinks.core.monitor.logger.Logger;
 import org.junit.jupiter.api.BeforeEach;
@@ -470,12 +467,12 @@ class AbstractPointSubscriptionTest {
         }
 
         @Override
-        public Mono<DataCollectorProvider.State> checkState() {
+        public Mono<State> checkState() {
             return Mono.empty();
         }
 
         @Override
-        public DataCollectorProvider.State state() {
+        public State state() {
             return null;
         }
 
@@ -492,7 +489,7 @@ class AbstractPointSubscriptionTest {
         }
 
         @Override
-        public reactor.core.Disposable onStateChanged(java.util.function.BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State> listener) {
+        public reactor.core.Disposable onStateChanged(java.util.function.BiConsumer<State, State> listener) {
             return null;
         }
 
