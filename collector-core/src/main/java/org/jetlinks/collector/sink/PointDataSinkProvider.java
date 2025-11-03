@@ -69,13 +69,6 @@ public interface PointDataSinkProvider extends CommandSupport {
 
     interface SinkRuntime extends Lifecycle, CommandSupport {
 
-        @Override
-        void dispose();
-
-        @Override
-        boolean isDisposed();
-
-
     }
 
     interface ChannelRuntime extends CommandSupport, Lifecycle {
@@ -83,12 +76,6 @@ public interface PointDataSinkProvider extends CommandSupport {
         @Nonnull
         @Override
         <R> R execute(@Nonnull Command<R> command);
-
-        @Override
-        void dispose();
-
-        @Override
-        boolean isDisposed();
 
     }
 

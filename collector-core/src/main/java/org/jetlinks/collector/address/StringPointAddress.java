@@ -4,7 +4,7 @@ import jakarta.annotation.Nonnull;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = false)
 @AllArgsConstructor
 class StringPointAddress extends PointAddress {
     final String address;

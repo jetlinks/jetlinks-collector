@@ -13,9 +13,7 @@ public interface PointDataSourceProvider {
 
     Mono<PointDataSource> createDataSource(PointDataSourceConfiguration configuration);
 
-    Mono<PointDescriptor> createPointDescriptor(SourcePointDescriberProperties configuration);
-
-
+    Mono<PointDescriptor> createPoint(SourcePointDescriberProperties configuration);
 
 
     interface PointDataSourceConfiguration {
