@@ -173,7 +173,7 @@ public abstract class ManagedLifecycle<
         @Override
         protected void hookOnNext(@Nonnull T value) {
             if (LOADED.compareAndSet(ManagedLifecycle.this, oldLoaded, newLoaded = value)) {
-                tryDispose(newLoaded);
+                tryDispose(oldLoaded);
                 ManagedLifecycle.this.handleLoaded(value);
             }
         }
@@ -333,7 +333,6 @@ public abstract class ManagedLifecycle<
     private void tryDispose(Object value) {
         if (value instanceof Disposable) {
             ((Disposable) value).dispose();
-            ;
         }
     }
 

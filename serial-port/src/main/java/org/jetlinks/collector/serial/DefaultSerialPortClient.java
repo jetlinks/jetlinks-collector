@@ -346,7 +346,7 @@ public class DefaultSerialPortClient implements
                 logger.info("write SerialPort [{}] rejected {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.complete();
             } catch (Throwable e) {
-                logger.error("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
+                logger.warn("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.error(new IllegalStateException("error.serial_port_error", e));
             }
         }
