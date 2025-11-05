@@ -9,13 +9,13 @@ public interface PointSinkSubscription extends Disposable {
 
     void subscribeAll();
 
-    boolean subscribed(PointAddress descriptor);
+    boolean subscribed(PointAddress address);
 
-    void subscribe(Collection<PointAddress> descriptors);
+    void subscribe(Collection<PointAddress> address);
 
-    void update(Collection<PointAddress> descriptors);
+    void update(Collection<PointAddress> address);
 
-    void unsubscribe(Collection<PointAddress> descriptors);
+    void unsubscribe(Collection<PointAddress> address);
 
     void reload();
 }

@@ -29,6 +29,6 @@ public interface PointDataOperations {
     Flux<Result<MappedPointData>> write(Collection<MappedPointData> data);
 
     // 创建数据订阅
-    PointSinkSubscription createSubscription(PointSink sink);
+    PointSinkSubscription createSubscription(String subscriptionId, PointSink sink);
 
 }
