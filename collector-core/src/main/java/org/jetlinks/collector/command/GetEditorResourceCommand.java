@@ -20,12 +20,10 @@ import java.util.function.Function;
  * @author zhangji 2024/9/11
  * @since 2.3
  */
-@Schema(title = "获取静态资源")
+@Schema(title = "获取编辑器资源文件")
 public class GetEditorResourceCommand extends AbstractCommand<Flux<DataBuffer>, GetEditorResourceCommand> {
 
-    private static final long serialVersionUID = -4073246475538441157L;
-
-    @Schema(title = "资源路径")
+    @Schema(title = "文件相对路径")
     public String getPath() {
         return getOrNull("path", String.class);
     }
@@ -34,6 +32,7 @@ public class GetEditorResourceCommand extends AbstractCommand<Flux<DataBuffer>, 
         return with("path", path);
     }
 
+    @Deprecated
     public static CommandHandler<GetEditorResourceCommand, Flux<DataBuffer>> createHandler(
         Function<GetEditorResourceCommand, Flux<DataBuffer>> handler
     ) {

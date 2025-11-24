@@ -10,14 +10,14 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 
-public abstract class AbstractLifecycle extends AnnotationCommandSupport implements DataCollectorProvider.Lifecycle {
+public abstract class AbstractLifecycle extends AnnotationCommandSupport implements Lifecycle {
 
-    private static final AtomicReferenceFieldUpdater<AbstractLifecycle, DataCollectorProvider.State>
-        STATE = AtomicReferenceFieldUpdater.newUpdater(AbstractLifecycle.class, DataCollectorProvider.State.class, "state");
+    private static final AtomicReferenceFieldUpdater<AbstractLifecycle, State>
+        STATE = AtomicReferenceFieldUpdater.newUpdater(AbstractLifecycle.class, State.class, "state");
 
-    private List<BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State>> stateListener;
+    private List<BiConsumer<State, State>> stateListener;
 
-    private volatile DataCollectorProvider.State state = CollectorConstants.States.initializing;
+    private volatile State state = CollectorConstants.States.initializing;
 
     private final Composite disposable = Disposables.composite();
 
@@ -25,22 +25,22 @@ public abstract class AbstractLifecycle extends AnnotationCommandSupport impleme
 
     protected abstract void stop0();
 
-    protected Mono<DataCollectorProvider.State> checkState0() {
+    protected Mono<State> checkState0() {
         return Mono.just(state());
     }
 
     @Override
-    public final Mono<DataCollectorProvider.State> checkState() {
+    public final Mono<State> checkState() {
         return checkState0();
     }
 
     @Override
-    public final DataCollectorProvider.State state() {
+    public final State state() {
         return STATE.get(this);
     }
 
-    protected final boolean changeState(DataCollectorProvider.State expect,
-                                        DataCollectorProvider.State state) {
+    protected final boolean changeState(State expect,
+                                        State state) {
 
         if (STATE.compareAndSet(this, expect, state)) {
             fireListener(expect, state);
@@ -49,9 +49,9 @@ public abstract class AbstractLifecycle extends AnnotationCommandSupport impleme
         return false;
     }
 
-    protected final boolean changeState(DataCollectorProvider.State state) {
+    protected final boolean changeState(State state) {
 
-        DataCollectorProvider.State before = STATE.getAndSet(this, state);
+        State before = STATE.getAndSet(this, state);
 
         if (before != state) {
             fireListener(before, state);
@@ -60,13 +60,13 @@ public abstract class AbstractLifecycle extends AnnotationCommandSupport impleme
         return false;
     }
 
-    private void fireListener(DataCollectorProvider.State before,
-                              DataCollectorProvider.State after) {
+    private void fireListener(State before,
+                              State after) {
 
-        List<BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State>> stateListener = this.stateListener;
+        List<BiConsumer<State, State>> stateListener = this.stateListener;
 
         if (stateListener != null) {
-            for (BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State> consumer : stateListener) {
+            for (BiConsumer<State, State> consumer : stateListener) {
                 consumer.accept(before, after);
             }
         }
@@ -98,9 +98,9 @@ public abstract class AbstractLifecycle extends AnnotationCommandSupport impleme
     }
 
     @Override
-    public final Disposable onStateChanged(BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State> listener) {
+    public final Disposable onStateChanged(BiConsumer<State, State> listener) {
         synchronized (this) {
-            List<BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State>> listeners = this.stateListener;
+            List<BiConsumer<State, State>> listeners = this.stateListener;
             if (listeners == null) {
                 listeners = new LinkedList<>();
                 this.stateListener = listeners;
@@ -109,7 +109,7 @@ public abstract class AbstractLifecycle extends AnnotationCommandSupport impleme
 
             return () -> {
                 synchronized (this) {
-                    List<BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State>> _listeners = this.stateListener;
+                    List<BiConsumer<State, State>> _listeners = this.stateListener;
                     _listeners.remove(listener);
                     if (_listeners.isEmpty()) {
                         this.stateListener = null;

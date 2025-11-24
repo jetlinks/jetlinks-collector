@@ -2,9 +2,9 @@ package org.jetlinks.collector.subscribe;
 
 import lombok.Getter;
 import org.jetlinks.collector.DataCollectorProvider;
+import org.jetlinks.collector.Health;
 import org.jetlinks.collector.PointData;
 import org.jetlinks.collector.Result;
-import org.jetlinks.collector.Health;
 import org.jetlinks.core.metadata.DataType;
 import org.jetlinks.core.metadata.types.UnknownType;
 import org.jetlinks.core.monitor.Monitor;
@@ -14,21 +14,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
+import org.jetlinks.collector.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -234,7 +230,7 @@ class AbstractPointSubscriptionTest {
         String pointId = "non-existent-point";
 
         StepVerifier.create(subscription.getPointRuntime(pointId))
-                .verifyComplete();
+                    .verifyComplete();
 
         // 验证订阅不存在的点位
         subscription.subscribe(Collections.singletonList(pointId));
@@ -477,12 +473,12 @@ class AbstractPointSubscriptionTest {
         }
 
         @Override
-        public Mono<DataCollectorProvider.State> checkState() {
+        public Mono<State> checkState() {
             return Mono.empty();
         }
 
         @Override
-        public DataCollectorProvider.State state() {
+        public State state() {
             return null;
         }
 
@@ -499,7 +495,7 @@ class AbstractPointSubscriptionTest {
         }
 
         @Override
-        public reactor.core.Disposable onStateChanged(java.util.function.BiConsumer<DataCollectorProvider.State, DataCollectorProvider.State> listener) {
+        public reactor.core.Disposable onStateChanged(java.util.function.BiConsumer<State, State> listener) {
             return null;
         }
 

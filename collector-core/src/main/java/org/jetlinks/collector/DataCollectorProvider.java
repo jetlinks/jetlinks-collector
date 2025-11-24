@@ -4,6 +4,7 @@ import org.jetlinks.collector.command.GetChannelConfigMetadataCommand;
 import org.jetlinks.collector.command.GetCollectorConfigMetadataCommand;
 import org.jetlinks.collector.command.GetPointConfigMetadataCommand;
 import org.jetlinks.collector.discovery.DiscoveryPointCommand;
+import org.jetlinks.collector.metadata.MetadataResolver;
 import org.jetlinks.collector.subscribe.PointListener;
 import org.jetlinks.collector.subscribe.PointSubscription;
 import org.jetlinks.core.Wrapper;
@@ -18,6 +19,7 @@ import reactor.core.publisher.Mono;
 
 import javax.annotation.Nonnull;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -78,6 +80,24 @@ public interface DataCollectorProvider extends CommandSupport {
      * @return 点位运行时
      */
     Mono<PointRuntime> createPoint(PointConfiguration configuration);
+
+    /**
+     * 元数据解析器
+     * @return MetadataResolver
+     */
+    MetadataResolver metadataResolver();
+
+    /**
+     * 获取采集器的特性信息
+     *
+     * @return 特性信息
+     * @see org.jetlinks.collector.CollectorConstants.CollectorFeatures
+     */
+    default Set<? extends Feature> getFeatures() {
+        return Collections.emptySet();
+    }
+
+
 
     interface ChannelConfiguration {
 
@@ -256,6 +276,16 @@ public interface DataCollectorProvider extends CommandSupport {
         Set<? extends Feature> getFeatures();
 
         /**
+         * 将点位配置信息解析出点位元数据,用于描述点位信息.
+         * <p>
+         * 如果配置不全,则返回{@link Mono#empty()}
+         *
+         * @param properties 配置信息
+         * @return 点位信息
+         */
+        Mono<PointMetadata> resolvePointMetadata(PointProperties properties);
+
+        /**
          * 判断是否支持特性
          *
          * @param feature 特性
@@ -329,63 +359,4 @@ public interface DataCollectorProvider extends CommandSupport {
         }
     }
 
-    /**
-     * 生命周期,用于管理状态等逻辑.
-     *
-     * @since 1.2.3
-     */
-    interface Lifecycle extends Wrapper, Disposable {
-
-        /**
-         * 检查状态
-         *
-         * @return 检查状态
-         */
-        Mono<State> checkState();
-
-        /**
-         * 当前状态
-         *
-         * @return 状态
-         */
-        State state();
-
-        /**
-         * 启动
-         */
-        void start();
-
-        /**
-         * 暂停
-         */
-        void pause();
-
-        /**
-         * 停止
-         */
-        void dispose();
-
-        /**
-         * 监听状态变化
-         *
-         * @param listener 状态变化
-         * @return Disposable
-         */
-        Disposable onStateChanged(BiConsumer<State, State> listener);
-    }
-
-    /**
-     * 状态
-     *
-     * @author zhouhao
-     * @see CollectorConstants.States
-     * @since 1.2.3
-     */
-    interface State {
-
-        String getValue();
-
-        String getText();
-
-    }
 }

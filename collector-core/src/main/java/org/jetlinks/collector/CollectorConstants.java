@@ -3,6 +3,8 @@ package org.jetlinks.collector;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.hswebframework.web.dict.I18nEnumDict;
+import org.jetlinks.core.lang.SeparatedCharSequence;
+import org.jetlinks.core.lang.SharedPathString;
 import org.jetlinks.core.message.HeaderKey;
 import org.jetlinks.core.metadata.Feature;
 
@@ -53,7 +55,7 @@ public interface CollectorConstants {
 
     @AllArgsConstructor
     @Getter
-    enum States implements DataCollectorProvider.State, I18nEnumDict<String> {
+    enum States implements State, I18nEnumDict<String> {
 
         initializing("初始化"),
         running("运行中"),
@@ -76,6 +78,41 @@ public interface CollectorConstants {
         CharSequence decode = "decode";
         CharSequence encode = "encode";
         CharSequence convert = "convert";
+
+    }
+
+    interface Topics{
+
+        /**
+         * @see PointData
+         */
+        String ALL_POINT_DATA = "/collector/*/*/*/data";
+
+        SharedPathString TOPIC_ALL_POINT_DATA_0 = SharedPathString.of(ALL_POINT_DATA);
+
+
+        String ALL_POINT_STATE = "/collector/*/*/*/state";
+
+        SharedPathString TOPIC_ALL_POINT_STATE_0 = SharedPathString.of(ALL_POINT_STATE);
+
+        /**
+         * @see BatchPointData
+         */
+        String ALL_POINT_BATCH_DATA = "/collector/*/*/data";
+
+        SharedPathString TOPIC_ALL_POINT_BATCH_DATA_0 = SharedPathString.of(ALL_POINT_BATCH_DATA);
+
+        static SeparatedCharSequence batchDataTopic(String channelId, String collectorId) {
+            return TOPIC_ALL_POINT_BATCH_DATA_0.replace(2, channelId, 3, collectorId);
+        }
+
+        static SeparatedCharSequence pointDataTopic(String channelId, String collectorId, String pointId) {
+            return TOPIC_ALL_POINT_DATA_0.replace(2, channelId, 3, collectorId,4,pointId);
+        }
+
+        static SeparatedCharSequence pointStateTopic(String channelId, String collectorId, String pointId) {
+            return TOPIC_ALL_POINT_STATE_0.replace(2, channelId, 3, collectorId,4,pointId);
+        }
 
     }
 

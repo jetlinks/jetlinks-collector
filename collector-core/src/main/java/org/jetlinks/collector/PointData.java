@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.apache.commons.codec.binary.Hex;
+import org.jetlinks.core.things.ThingProperty;
 import org.jetlinks.core.utils.SerializeUtils;
 
 import java.io.Externalizable;
@@ -59,12 +60,43 @@ public class PointData implements Externalizable {
      */
     private Map<String, Object> others;
 
+    public static PointData of(String pointId,
+                               byte[] nativeData,
+                               Object parseData,
+                               String state,
+                               long timestamp) {
+        return new PointData(pointId, nativeData, parseData, state, timestamp, null);
+    }
+
+
+    public static PointData of(ThingProperty property) {
+        PointData data = new PointData();
+        data.setPointId(property.getProperty());
+        data.setState(property.getState());
+        data.setTimestamp(property.getTimestamp());
+        Object value = property.getValue();
+        if (value instanceof SimplePointData simple) {
+            data.setParsedData(simple.getParsedData());
+            data.setOriginData(simple.getOriginData());
+        } else {
+            data.setParsedData(value);
+        }
+        return data;
+    }
+
     @Override
     public String toString() {
         String val = parsedData == null
             ? Hex.encodeHexString(originData)
             : String.valueOf(parsedData);
-        return state==null?val:(val + ":" + state);
+        return state == null ? val : (val + ":" + state);
+    }
+
+    public SimplePointData toSimple() {
+        SimplePointData data = new SimplePointData();
+        data.setParsedData(parsedData);
+        data.setOriginData(originData);
+        return data;
     }
 
 

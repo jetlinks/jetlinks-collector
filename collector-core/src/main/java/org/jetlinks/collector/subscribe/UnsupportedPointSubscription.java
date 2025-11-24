@@ -30,4 +30,9 @@ class UnsupportedPointSubscription implements PointSubscription {
     public void dispose() {
 
     }
+
+    @Override
+    public boolean isDisposed() {
+        return true;
+    }
 }

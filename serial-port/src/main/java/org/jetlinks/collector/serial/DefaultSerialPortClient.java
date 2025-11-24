@@ -24,6 +24,7 @@ import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
@@ -111,8 +112,7 @@ public class DefaultSerialPortClient implements
     @Override
     public Mono<ByteBuf> sendAndReceive(ByteBuf buf, Duration timeout) {
         return this
-            .sendAndReceiveMulti(buf, timeout)
-            .take(1)
+            .sendAndReceiveMulti(buf, timeout, true)
             .singleOrEmpty();
     }
 
@@ -128,15 +128,14 @@ public class DefaultSerialPortClient implements
         return port.isOpen();
     }
 
-    @Override
-    public Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout) {
+    private Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout, boolean single) {
         return Flux
             .<ByteBuf>create(sink -> {
                 if (!port.isOpen() || isDisposed()) {
                     sink.error(new PortClosedException(getPath()));
                     return;
                 }
-                PendingRequest request = new PendingRequest(buf, sink, timeout);
+                PendingRequest request = new PendingRequest(buf, sink, timeout, single);
                 sink.onDispose(request);
 
                 if (queue.size() >= maxQueueSize || !queue.offer(request)) {
@@ -144,6 +143,11 @@ public class DefaultSerialPortClient implements
                 }
                 drain();
             });
+    }
+
+    @Override
+    public Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout) {
+        return sendAndReceiveMulti(buf, timeout, false);
     }
 
     private void drain() {
@@ -279,6 +283,7 @@ public class DefaultSerialPortClient implements
         ByteBuf request;
         FluxSink<ByteBuf> sink;
         Duration requestTimeout;
+        boolean single;
 
         public boolean isCancelled() {
             return isDisposed();
@@ -304,6 +309,9 @@ public class DefaultSerialPortClient implements
 
         public void complete(ByteBuf buf) {
             sink.next(buf);
+            if (single) {
+                sink.complete();
+            }
         }
 
         private void sendRequest() {
@@ -334,8 +342,11 @@ public class DefaultSerialPortClient implements
                         requestTimeout.toMillis(),
                         TimeUnit.MILLISECONDS);
                 }
+            } catch (RejectedExecutionException e) {
+                logger.info("write SerialPort [{}] rejected {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
+                sink.complete();
             } catch (Throwable e) {
-                logger.error("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
+                logger.warn("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.error(new IllegalStateException("error.serial_port_error", e));
             }
         }

@@ -12,7 +12,7 @@ public interface PointSubscription extends Disposable {
 
     boolean subscribed(String pointId);
 
-    void subscribe(Collection<String> points);
+    void subscribe(Collection<String> pointId);
 
     void unsubscribe(Collection<String> pointId);
 
