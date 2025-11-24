@@ -10,6 +10,7 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -121,6 +122,17 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         long errorCode = CollectorUtils.inferErrorCode(error);
         this.setCode(errorCode);
         return this;
+    }
+
+    public <NEW> Result<NEW> copy(NEW data) {
+        Result<NEW> result = new Result<>();
+        result.setSuccess(this.isSuccess());
+        result.setCode(this.getCode());
+        if (this.getHeaders() != null) {
+            result.setHeaders(new HashMap<>(this.getHeaders()));
+        }
+        result.setData(data);
+        return result;
     }
 
     @Override

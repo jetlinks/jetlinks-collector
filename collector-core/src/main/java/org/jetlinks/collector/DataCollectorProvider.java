@@ -10,6 +10,7 @@ import org.jetlinks.collector.subscribe.PointSubscription;
 import org.jetlinks.core.Wrapper;
 import org.jetlinks.core.command.Command;
 import org.jetlinks.core.command.CommandSupport;
+import org.jetlinks.core.metadata.DataType;
 import org.jetlinks.core.metadata.Feature;
 import org.jetlinks.core.monitor.Monitor;
 import reactor.core.Disposable;
@@ -319,13 +320,18 @@ public interface DataCollectorProvider extends CommandSupport {
          */
         String getId();
 
+
+        DataType getDataType();
+
         /**
          * 测试点位,返回点位健康度.
          *
          * @return 测试结果
          * @see Result#getCode()
          */
-        Mono<Result<Health>> test();
+        default Mono<Result<Health>> test() {
+            return Mono.just(Result.success(Health.ok()));
+        }
 
         /**
          * 读取点位数据
