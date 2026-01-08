@@ -27,6 +27,8 @@ public interface CollectorConstants {
 
         HeaderKey<String> pointId = HeaderKey.of("pointId", null, String.class);
         HeaderKey<String> reason = HeaderKey.of("reason", null, String.class);
+        HeaderKey<String> channelId = HeaderKey.of("channelId", null, String.class);
+        HeaderKey<String> collectorId = HeaderKey.of("collectorId", null, String.class);
 
     }
 

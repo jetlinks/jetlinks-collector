@@ -2,12 +2,9 @@ package org.jetlinks.collector;
 
 import io.netty.buffer.ByteBufAllocator;
 import lombok.AllArgsConstructor;
-import org.jetlinks.collector.command.GetEditorResourceCommand;
+import org.jetlinks.collector.command.*;
 import org.jetlinks.collector.metadata.MetadataResolver;
 import org.jetlinks.core.annotation.command.CommandHandler;
-import org.jetlinks.collector.command.GetChannelConfigMetadataCommand;
-import org.jetlinks.collector.command.GetCollectorConfigMetadataCommand;
-import org.jetlinks.collector.command.GetPointConfigMetadataCommand;
 import org.jetlinks.core.command.CommandMetadataResolver;
 import org.jetlinks.core.metadata.PropertyMetadata;
 import org.jetlinks.supports.command.AnnotationCommandSupport;
@@ -37,6 +34,14 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
     @Override
     public Mono<PointMetadata> resolvePointMetadata(PointProperties properties) {
         return Mono.empty();
+    }
+
+    public List<AccessMode> getAccessModeSupport() {
+        return List.of(
+            AccessMode.read,
+            AccessMode.write,
+            AccessMode.subscribe
+        );
     }
 
     protected Flux<DataBuffer> getEditorResource(String path, String provider, Class<?> clazz) {
@@ -75,5 +80,10 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
         return Mono.just(
             CommandMetadataResolver.resolveInputs(ResolvableType.forType(pointConfigType))
         );
+    }
+
+    @CommandHandler
+    public Mono<List<AccessMode>> getSupportAccessModes(GetSupportAccessModesCommand command) {
+        return Mono.just(getAccessModeSupport());
     }
 }
