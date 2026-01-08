@@ -5,10 +5,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
 import org.jetlinks.collector.address.PointAddress;
-import org.jetlinks.core.codec.Codec;
 import org.jetlinks.core.codec.layout.ByteLayout;
 import org.jetlinks.core.metadata.DataType;
 
+import java.util.List;
 import java.util.Map;
 
 @Getter
@@ -18,6 +18,11 @@ public class PointMetadata {
     @Schema(title = "点位地址标识")
     private PointAddress address;
 
+    @Schema(title = "访问方式")
+    private AccessMode[] accessModes = new AccessMode[]{
+        AccessMode.read, AccessMode.write, AccessMode.subscribe
+    };
+
     /**
      * 点位是否自动编解码,为true时,表示点位直接处理java类型,平台无需进行{@link Codec#encode(Object, ByteBuf)}.
      *
@@ -25,6 +30,13 @@ public class PointMetadata {
      */
     @Schema(title = "是否自动编解码")
     private boolean autoCodec;
+
+
+    /**
+     * 点位使用平台的解码时
+     */
+    @Schema(title = "当前支持的平台解码")
+    private List<String> supportCodecs;
 
     /**
      * 当{@link PointMetadata#isAutoCodec()}为false时,此字段表示点位数据的字节长度,-1表示长度不确定.
@@ -46,4 +58,6 @@ public class PointMetadata {
 
     @Schema(title = "自定义元数据信息")
     private Map<String, Object> metadata;
+
+
 }

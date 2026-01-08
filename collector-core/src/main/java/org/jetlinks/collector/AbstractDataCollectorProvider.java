@@ -36,14 +36,6 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
         return Mono.empty();
     }
 
-    public List<AccessMode> getAccessModeSupport() {
-        return List.of(
-            AccessMode.read,
-            AccessMode.write,
-            AccessMode.subscribe
-        );
-    }
-
     protected Flux<DataBuffer> getEditorResource(String path, String provider, Class<?> clazz) {
         // 获取默认静态资源
         // /resources/{provider}/{path}
@@ -80,10 +72,5 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
         return Mono.just(
             CommandMetadataResolver.resolveInputs(ResolvableType.forType(pointConfigType))
         );
-    }
-
-    @CommandHandler
-    public Mono<List<AccessMode>> getSupportAccessModes(GetSupportAccessModesCommand command) {
-        return Mono.just(getAccessModeSupport());
     }
 }
