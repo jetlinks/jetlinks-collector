@@ -22,6 +22,8 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
         CONNECTING = AtomicReferenceFieldUpdater.newUpdater(AbstractTcpClientLifecycle.class, Sinks.One.class, "connecting");
 
     private volatile Connection connected;
+    // 握手尚未完成的连接。失败或停止时释放，成功后才转入 connected。
+    private volatile Connection opening;
     private volatile Sinks.One<Connection> connecting;
     private volatile Disposable connectionDisposable;
     private int retryNumber;
@@ -65,6 +67,9 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
         if (null != connected) {
             connected.dispose();
         }
+        if (null != opening) {
+            opening.dispose();
+        }
         if (connectionDisposable != null) {
             connectionDisposable.dispose();
         }
@@ -76,10 +81,10 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
     private void tryReconnect() {
         long duration = retryNumber * 2L;
         logger().info("tcp服务将在{}秒后重连", duration);
+        // 握手在 connect() 内完成。这里只负责退避后重试，失败不再次重试，避免和外层错误回调叠成两次重连。
         Mono.delay(Duration.ofSeconds(duration))
             .then(Mono.defer(this::connect))
-            .flatMap(this::initConnection)
-            .subscribe();
+            .subscribe(null, error -> logger().warn("tcp服务初始化失败", error));
     }
 
     protected final Mono<Connection> connect() {
@@ -100,19 +105,29 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
 
             @SuppressWarnings("all")
             Disposable connectionDisposable = connection()
+                // TCP 连通后先完成协议握手。Reactor Netty 先把连接交给下游，随后才回调 doOnConnected，
+                // 所以握手失败必须释放这里的 socket，不能只依赖 opening。
+                .flatMap(socket -> initConnection(socket)
+                    .doOnError(error -> socket.dispose())
+                    .thenReturn(socket))
                 .as(tracer().traceMono("/tcp/connect"))
                 .subscribe(
                     c -> {
                         logger().debug("tcp服务连接成功");
                         lastError = null;
+                        retryNumber = 0;
+                        publish(c);
                         connecting.tryEmitValue(c);
                         CONNECTING.compareAndSet(this, connecting, null);
                     },
                     (err) -> {
                         logger().warn("tcp服务连接失败", err);
+                        discardOpening();
                         connecting.tryEmitError(lastError = err);
                         CONNECTING.compareAndSet(this, connecting, null);
-                        tryReconnect();
+                        if (!CollectorConstants.States.stopped.equals(state())) {
+                            tryReconnect();
+                        }
                     },
                     () -> {
                         if (CONNECTING.compareAndSet(this, connecting, null)) {
@@ -149,16 +164,34 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
             .cast(Connection.class);
     }
 
-    private synchronized void connected(Connection connected) {
-        retryNumber = 0;
-        if (this.connected != null) {
-            this.connected.dispose();
-        }
-        if (this.isDisposed()) {
-            connected.dispose();
+    private synchronized void connected(Connection socket) {
+        // 此时只是 TCP 已连通。重试计数要等握手成功再清零，否则握手失败会以 0 秒间隔空转。
+        if (CollectorConstants.States.stopped.equals(state())) {
+            socket.dispose();
             return;
         }
-        this.connected = connected;
+        Connection previous = this.opening;
+        this.opening = socket;
+        if (previous != null && previous != socket) {
+            previous.dispose();
+        }
+    }
+
+    private synchronized void publish(Connection socket) {
+        Connection previous = this.connected;
+        this.connected = socket;
+        this.opening = null;
+        if (previous != null && previous != socket) {
+            previous.dispose();
+        }
+    }
+
+    private synchronized void discardOpening() {
+        Connection opening = this.opening;
+        this.opening = null;
+        if (opening != null) {
+            opening.dispose();
+        }
     }
 
 }
