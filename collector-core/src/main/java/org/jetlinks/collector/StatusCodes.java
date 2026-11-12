@@ -16,7 +16,7 @@ public class StatusCodes {
 
 
     public static Optional<StatusCode> findCode(long code) {
-        return Optional.of(ALL_CODES.get(code));
+        return Optional.ofNullable(ALL_CODES.get(code));
     }
 
     public static StatusCode of(long code) {

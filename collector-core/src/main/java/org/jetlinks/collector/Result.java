@@ -113,14 +113,17 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         return new Result<T>().with(error);
     }
 
-    public Result<T> with(Throwable error){
+    public Result<T> with(Throwable error) {
         this.setSuccess(false);
+        if (error == null) {
+            this.setCode(InternalStatusCode.Bad_InternalError.getCode());
+            this.withReason("error.internal_error");
+            return this;
+        }
         this.addHeader("errorType", error.getClass().getCanonicalName());
         this.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
-
-        // 根据异常类型推断错误码
-        long errorCode = CollectorUtils.inferErrorCode(error);
-        this.setCode(errorCode);
+        this.withReason(CollectorUtils.reasonOf(error));
+        this.setCode(CollectorUtils.inferErrorCode(error));
         return this;
     }
 
