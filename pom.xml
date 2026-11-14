@@ -54,7 +54,7 @@
         <project.build.jdk>${java.version}</project.build.jdk>
         <reactor.version>2024.0.4</reactor.version>
         <slf4j.version>1.7.36</slf4j.version>
-        <jetlinks.core.version>1.3.2-SNAPSHOT</jetlinks.core.version>
+        <jetlinks.core.version>1.3.3-SNAPSHOT</jetlinks.core.version>
         <jetlinks.plugin.version>1.0.3</jetlinks.plugin.version>
         <hsweb.framework.version>5.0.0</hsweb.framework.version>
         <spring.boot.version>3.4.11</spring.boot.version>

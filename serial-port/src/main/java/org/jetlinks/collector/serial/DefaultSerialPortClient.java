@@ -9,8 +9,9 @@ import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.jetlinks.collector.CollectorConstants;
 import org.jetlinks.core.monitor.Monitor;
+import org.jetlinks.core.server.ConnectionMetrics;
+import org.jetlinks.core.server.ConnectionMetricsRecorder;
 import org.slf4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.Disposables;
@@ -29,6 +30,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
+/**
+ * 单串口的有界请求队列与帧接收客户端，统一记录实际收发字节和请求耗时。
+ * 实例持有观测对象；关闭时注销观测并释放请求、解析器及串口资源。
+ */
 @Slf4j
 public class DefaultSerialPortClient implements
     SerialPortClient, SerialPortDataListenerWithExceptions {
@@ -57,6 +62,12 @@ public class DefaultSerialPortClient implements
     private final int maxQueueSize;
     private final Monitor monitor;
     private final Logger logger;
+    // 串口层统一记录实际帧字节，协议插件无需再次估算 Modbus／其他协议的流量。
+    private final ConnectionMetricsRecorder metrics = new ConnectionMetricsRecorder() {
+        @Override public long getPendingMessages() {
+            return queue.size() + (pending == null ? 0 : 1);
+        }
+    };
 
     public DefaultSerialPortClient(SerialPortConfig config,
                                    PayloadParser parser,
@@ -102,6 +113,14 @@ public class DefaultSerialPortClient implements
         if (!this.port.addDataListener(this)) {
             throw new IllegalStateException("do not set listener to port");
         }
+        metrics.connecting();
+        if (port.isOpen()) {
+            metrics.connected();
+            disposable.add(metrics::disconnected);
+        } else {
+            metrics.connectFailed();
+        }
+        disposable.add(monitor.metrics().observe("transport", ConnectionMetrics.class, metrics));
     }
 
     @Override
@@ -111,9 +130,9 @@ public class DefaultSerialPortClient implements
 
     @Override
     public Mono<ByteBuf> sendAndReceive(ByteBuf buf, Duration timeout) {
-        return this
+        return metrics.recordRequest(this
             .sendAndReceiveMulti(buf, timeout, true)
-            .singleOrEmpty();
+            .singleOrEmpty(), error -> error instanceof RequestTimeoutException);
     }
 
     @Override
@@ -213,10 +232,7 @@ public class DefaultSerialPortClient implements
             return;
         }
         if (event.getEventType() == SerialPort.LISTENING_EVENT_DATA_RECEIVED) {
-            // 监控
-            monitor
-                .metrics()
-                .count(CollectorConstants.Metrics.received, event.getReceivedData().length);
+            metrics.received(event.getReceivedData().length);
 
             if (logger.isInfoEnabled()) {
                 logger.info("received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
@@ -233,6 +249,7 @@ public class DefaultSerialPortClient implements
     }
 
     private void handleBuffer(ByteBuf buffer) {
+        metrics.messageReceived();
         PendingRequest pending = PENDING.get(this);
         if (logger.isDebugEnabled()) {
             logger.debug("received SerialPort [{}] data :{}",
@@ -324,6 +341,7 @@ public class DefaultSerialPortClient implements
                                  ByteBufUtil.hexDump(payload));
                 }
                 out.write(payload);
+                metrics.sent(payload.length);
                 if (logger.isInfoEnabled()) {
                     logger.info("write SerialPort [{}] data: {}",
                                 port.getSystemPortPath(),
@@ -346,6 +364,7 @@ public class DefaultSerialPortClient implements
                 logger.info("write SerialPort [{}] rejected {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.complete();
             } catch (Throwable e) {
+                metrics.transportError();
                 logger.warn("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
                 sink.error(new IllegalStateException("error.serial_port_error", e));
             }
