@@ -15,6 +15,9 @@ import reactor.util.context.ContextView;
  * @see ActionRecorder
  */
 public final class CollectorRecording {
+    public static final String EXECUTION = "execution";
+    public static final String LOAD = "load";
+    public static final String SUBSCRIBE = "subscribe";
     public static final String COLLECT = "collect";
     public static final String POINT = "point";
     public static final String DECODE = "decode";
@@ -28,9 +31,20 @@ public final class CollectorRecording {
 
     private CollectorRecording() { }
 
+    private enum Receiver { INSTANCE }
+
+    /** 本次执行的接收端由 owner 组合一次；默认路径直接使用 Monitor，不创建接收端。 */
+    public static Recorder recorder(Monitor monitor, ContextView context) {
+        return context.getOrDefault(Receiver.INSTANCE, monitor.recorder());
+    }
+
+    public static Context withRecorder(ContextView context, Recorder recorder) {
+        return Context.of(context).put(Receiver.INSTANCE, recorder);
+    }
+
     /** 每次实际执行创建未共享的 action；本地父作用域按原接收端身份关联。 */
     public static <T> ActionRecorder<T> start(Monitor monitor, String name, ContextView context) {
-        Recorder recorder = monitor.recorder();
+        Recorder recorder = recorder(monitor, context);
         if (recorder == Recorder.noop()) return ActionRecorder.noop();
         ActionRecorder<?> parent = context.getOrDefault(CollectorRecording.class, null);
         if (parent != null) recorder = Recorder.withParent(recorder, parent);
@@ -47,7 +61,8 @@ public final class CollectorRecording {
     public static void result(ActionRecorder<?> action, Result<?> result) {
         action.attribute("code", result.getCode()).attribute("success", result.isSuccess());
         Object reason = result.getHeaderOrDefault(CollectorConstants.Headers.reason);
-        if (reason != null) action.attribute("reason", reason);
+        if (reason instanceof Enum<?>) reason = ((Enum<?>) reason).name();
+        value(action, "reason", reason);
     }
 
     /** 仅保存简单值的有限摘要，不调用任意业务对象的序列化或 toString。 */
