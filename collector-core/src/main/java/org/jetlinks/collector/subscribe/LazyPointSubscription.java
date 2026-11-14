@@ -42,7 +42,7 @@ public class LazyPointSubscription implements PointSubscription {
         this.points.removeAll(pointId);
         Disposable sub = holder.get();
         if (sub instanceof PointSubscription _sub) {
-            _sub.unsubscribe(points);
+            _sub.unsubscribe(pointId);
         }
     }
 
