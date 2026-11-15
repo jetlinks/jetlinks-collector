@@ -3,6 +3,7 @@ package org.jetlinks.collector.plugin;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.FixedLengthFrameDecoder;
+import io.netty.util.AbstractReferenceCounted;
 import org.jetlinks.collector.plugin.tcp.SequencedPayload;
 import org.jetlinks.core.monitor.Monitor;
 import org.jetlinks.core.monitor.logger.Logger;
@@ -65,11 +66,13 @@ class AbstractSequencedTcpClientLifecycleTest {
     }
 
     @Test
-    void synchronousEncodingFailureKeepsTheOriginalErrorAndDoesNotBreakTheNextRequest() {
+    void synchronousEncodingFailureClearsPendingAndReleasesAnUnmatchedLateReply() throws Exception {
         start();
         IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
             () -> probe.request(99).block(Duration.ofSeconds(5)));
         assertSame(probe.encodingFailure, failure);
+        probe.sendLateReply(probe.encodingSequence);
+        assertTrue(probe.lateReleased.await(5, TimeUnit.SECONDS), "失败请求不能继续接收迟到响应");
         assertEquals(42, probe.request(42).block(Duration.ofSeconds(5)).value());
     }
 
@@ -79,6 +82,8 @@ class AbstractSequencedTcpClientLifecycleTest {
         Disposable pending = probe.request(100).subscribe();
         assertTrue(probe.waiting.await(5, TimeUnit.SECONDS));
         pending.dispose();
+        probe.sendLateReply(probe.cancelledSequence);
+        assertTrue(probe.lateReleased.await(5, TimeUnit.SECONDS), "取消后不再持有响应关联");
 
         assertEquals(42, probe.request(42).block(Duration.ofSeconds(5)).value());
     }
@@ -104,10 +109,35 @@ class AbstractSequencedTcpClientLifecycleTest {
         probe.start();
     }
 
-    private record Reply(Integer number, int value) implements SequencedPayload<Integer> {
+    // 模拟解码后仍持有引用计数资源的响应，未匹配请求时应由公共接收路径释放。
+    private static final class Reply extends AbstractReferenceCounted implements SequencedPayload<Integer> {
+        private final Integer number;
+        private final int value;
+        private final CountDownLatch released;
+
+        private Reply(Integer number, int value, CountDownLatch released) {
+            this.number = number;
+            this.value = value;
+            this.released = released;
+        }
+
+        int value() {
+            return value;
+        }
+
         @Override
         public Integer getSequenceNumber() {
             return number;
+        }
+
+        @Override
+        protected void deallocate() {
+            if (released != null) released.countDown();
+        }
+
+        @Override
+        public Reply touch(Object hint) {
+            return this;
         }
     }
 
@@ -115,7 +145,10 @@ class AbstractSequencedTcpClientLifecycleTest {
         private final int port;
         private final List<Integer> sent = new CopyOnWriteArrayList<>();
         private final CountDownLatch waiting = new CountDownLatch(1);
+        private final CountDownLatch lateReleased = new CountDownLatch(1);
         private final IllegalArgumentException encodingFailure = new IllegalArgumentException("encoding failed");
+        private int encodingSequence;
+        private int cancelledSequence;
 
         private Probe(int port) {
             this.port = port;
@@ -144,19 +177,32 @@ class AbstractSequencedTcpClientLifecycleTest {
         @Override
         protected Reply handleInbound(Object payload) {
             ByteBuf buffer = (ByteBuf) payload;
-            Reply reply = new Reply(buffer.readInt(), buffer.readInt());
-            return reply.value() == 100 ? null : reply;
+            int sequence = buffer.readInt(), value = buffer.readInt();
+            return value == 100 ? null : new Reply(sequence, value, value == 101 ? lateReleased : null);
         }
 
         @Override
         protected Object handleOutbound(Integer number, Integer value) {
             sent.add(value);
-            if (value == 99) throw encodingFailure;
-            if (value == 100) waiting.countDown();
+            if (value == 99) {
+                encodingSequence = number;
+                throw encodingFailure;
+            }
+            if (value == 100) {
+                cancelledSequence = number;
+                waiting.countDown();
+            }
             return Unpooled.buffer(8).writeInt(number).writeInt(value);
         }
 
         @Override
         protected Integer nextSequenceNumber(Integer previous) { return previous == null ? 1 : previous + 1; }
+
+        private void sendLateReply(int sequence) {
+            connect().flatMap(connection -> connection.outbound()
+                                                     .sendObject(Unpooled.buffer(8).writeInt(sequence).writeInt(101))
+                                                     .then())
+                     .block(Duration.ofSeconds(5));
+        }
     }
 }
