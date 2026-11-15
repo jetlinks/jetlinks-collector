@@ -132,10 +132,11 @@ public abstract class AbstractSequencedTcpClientLifecycle<REQ, RES extends Seque
                 ID number = nextRequestSequenceNumber();
                 pendingRequests.put(number, sink);
                 @SuppressWarnings("all")
-                Disposable outbound = connection
+                // 编码可能同步抛错，必须进入发送链路，确保仍能安装并执行 pending 清理。
+                Disposable outbound = Mono.defer(() -> connection
                     .outbound()
                     .sendObject(handleOutbound(number, request))
-                    .then()
+                    .then())
                     .subscribe(ignore -> {
                     }, sink::error);
 

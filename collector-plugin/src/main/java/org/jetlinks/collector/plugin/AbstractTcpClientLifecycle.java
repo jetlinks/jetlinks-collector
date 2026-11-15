@@ -98,7 +98,9 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
         }
 
         Sinks.One<Connection> connecting = Sinks.one();
-        if (CONNECTING.compareAndSet(this, null, connecting)) {
+        // 保留本次观察到的握手引用；CAS 失败后再次读字段可能遇到握手已完成并清空。
+        Sinks.One<Connection> active = CONNECTING.updateAndGet(this, current -> current == null ? connecting : current);
+        if (active == connecting) {
             if (null != this.connectionDisposable) {
                 this.connectionDisposable.dispose();
             }
@@ -139,7 +141,7 @@ public abstract class AbstractTcpClientLifecycle extends AbstractLifecycle {
             this.connectionDisposable = connectionDisposable;
             return connecting.asMono();
         }
-        return this.connecting.asMono();
+        return active.asMono();
     }
 
     private Mono<Connection> connection() {
