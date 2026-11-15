@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 import java.util.*;
@@ -336,6 +337,143 @@ class AbstractPointSubscriptionTest {
         Monitor monitor = subscription.monitor();
         assertNotNull(monitor);
         assertNotNull(monitor.logger());
+    }
+
+    @Test
+    void unsubscribeMustCancelAPendingLookupAndNotCreateALateSubscription() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        Sinks.One<TestPointRuntime> lookup = Sinks.one();
+        AtomicInteger cancelled = new AtomicInteger();
+        controlled.nextLookup("p", lookup.asMono().doOnCancel(cancelled::incrementAndGet));
+        controlled.subscribe(List.of("p"));
+        controlled.unsubscribe(List.of("p"));
+        assertEquals(1, cancelled.get());
+        lookup.tryEmitValue(new TestPointRuntime("p"));
+        assertTrue(controlled.isEmpty());
+        assertEquals(0, controlled.subscribeCount);
+        assertTrue(controlled.registered.isEmpty());
+    }
+
+    @Test
+    void disposeMustCancelPendingLookupsAndReleaseExistingRegistrations() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        controlled.subscribe(List.of("active"));
+        Sinks.One<TestPointRuntime> lookup = Sinks.one();
+        AtomicInteger cancelled = new AtomicInteger();
+        controlled.nextLookup("pending", lookup.asMono().doOnCancel(cancelled::incrementAndGet));
+        controlled.subscribe(List.of("pending"));
+        controlled.dispose();
+        assertEquals(1, cancelled.get());
+        lookup.tryEmitValue(new TestPointRuntime("pending"));
+        controlled.subscribe(List.of("after-close"));
+        assertTrue(controlled.isDisposed());
+        assertTrue(controlled.isEmpty());
+        assertTrue(controlled.registered.isEmpty());
+        assertEquals(1, controlled.subscribeCount);
+    }
+
+    @Test
+    void aCancelledLookupMustNotReplaceANewerSubscriptionWithTheSameId() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        Sinks.One<TestPointRuntime> oldLookup = Sinks.one();
+        Sinks.One<TestPointRuntime> newLookup = Sinks.one();
+        controlled.nextLookup("p", oldLookup.asMono());
+        controlled.nextLookup("p", newLookup.asMono());
+        controlled.subscribe(List.of("p"));
+        controlled.unsubscribe(List.of("p"));
+        controlled.subscribe(List.of("p"));
+        TestPointRuntime current = new TestPointRuntime("p");
+        newLookup.tryEmitValue(current);
+        oldLookup.tryEmitValue(new TestPointRuntime("p"));
+        assertSame(current, controlled.get("p").getPoint());
+        assertEquals(1, controlled.subscribeCount);
+        assertEquals(1, controlled.registered.size());
+        controlled.dispose();
+        assertTrue(controlled.registered.isEmpty());
+    }
+
+    @Test
+    void unsubscribeMustAlsoDiscardAPointAlreadyBufferedBehindAnotherLookup() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        Sinks.One<TestPointRuntime> pending = Sinks.one();
+        controlled.nextLookup("second", pending.asMono());
+        controlled.subscribe(List.of("first", "second"));
+        controlled.unsubscribe(List.of("first"));
+        pending.tryEmitValue(new TestPointRuntime("second"));
+        assertFalse(controlled.containsKey("first"));
+        assertTrue(controlled.subscribed("second"));
+        assertEquals(1, controlled.subscribeCount);
+        assertEquals(1, controlled.registered.size());
+        controlled.dispose();
+        assertTrue(controlled.registered.isEmpty());
+    }
+
+    @Test
+    void normalReloadMustUnregisterTheOldPointBeforeItsReplacement() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        controlled.subscribe(List.of("p"));
+        TestSubscribingPoint old = controlled.get("p");
+        controlled.reload();
+        assertNotSame(old, controlled.get("p"));
+        assertEquals(Set.of(controlled.get("p")), controlled.registered);
+        assertEquals(2, controlled.subscribeCount);
+        assertEquals(1, controlled.unsubscribeCount);
+        controlled.dispose();
+        assertTrue(controlled.registered.isEmpty());
+    }
+
+    @Test
+    void cancelledAsyncOperationsMustReleaseTheirLookupOwnershipForRetry() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        AtomicInteger cancelled = new AtomicInteger();
+        controlled.nextLookup("p", Mono.<TestPointRuntime>never().doOnCancel(cancelled::incrementAndGet));
+        reactor.core.Disposable loading = controlled.subscribeAsync(List.of("p")).subscribe();
+        loading.dispose();
+        assertEquals(1, cancelled.get());
+        controlled.subscribe(List.of("p"));
+        assertTrue(controlled.subscribed("p"));
+        assertEquals(1, controlled.registered.size());
+        controlled.dispose();
+    }
+
+    @Test
+    void emptyAndFailedLookupsMustNotPreventANewAttempt() {
+        ControlledSubscription controlled = new ControlledSubscription(mockListener);
+        controlled.nextLookup("p", Mono.empty());
+        controlled.nextLookup("p", Mono.error(new IllegalStateException("lookup failed")));
+        controlled.subscribe(List.of("p"));
+        controlled.subscribe(List.of("p"));
+        assertTrue(controlled.isEmpty());
+        controlled.subscribe(List.of("p"));
+        assertTrue(controlled.subscribed("p"));
+        assertEquals(1, controlled.subscribeCount);
+        controlled.dispose();
+    }
+
+    private static final class ControlledSubscription extends TestPointSubscription {
+        final Map<String, Deque<Mono<TestPointRuntime>>> lookups = new HashMap<>();
+        final Set<TestSubscribingPoint> registered = new HashSet<>();
+        int subscribeCount;
+        int unsubscribeCount;
+
+        ControlledSubscription(PointListener listener) { super(listener); }
+        void nextLookup(String id, Mono<TestPointRuntime> lookup) {
+            lookups.computeIfAbsent(id, ignore -> new ArrayDeque<>()).add(lookup);
+        }
+        @Override public Mono<TestPointRuntime> getPointRuntime(String id) {
+            Deque<Mono<TestPointRuntime>> queued = lookups.get(id);
+            return queued == null || queued.isEmpty() ? Mono.just(new TestPointRuntime(id)) : queued.removeFirst();
+        }
+        @Override protected Mono<Void> subscribe(List<TestSubscribingPoint> points) {
+            return Mono.fromRunnable(() -> {
+                points.forEach(point -> { point.subscribed = true; registered.add(point); });
+                subscribeCount += points.size();
+            });
+        }
+        @Override protected Mono<Void> unsubscribe(List<TestSubscribingPoint> points) {
+            return Mono.fromRunnable(() -> { registered.removeAll(points); unsubscribeCount += points.size(); });
+        }
+        @Override protected void doDispose() { registered.clear(); clear(); super.doDispose(); }
     }
 
     /**
