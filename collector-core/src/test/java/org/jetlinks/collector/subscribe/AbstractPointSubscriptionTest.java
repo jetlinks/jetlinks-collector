@@ -455,7 +455,172 @@ class AbstractPointSubscriptionTest {
         controlled.dispose();
     }
 
-    private static final class ControlledSubscription extends TestPointSubscription {
+    @Test
+    void unsubscribeMustCancelAnAsyncCommitWhenEveryPointWasRevoked() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        controlled.commits.add(commit.asMono());
+        controlled.subscribe(List.of("p"));
+        controlled.unsubscribe(List.of("p"));
+        assertEquals(1, controlled.cancelled.get());
+        commit.tryEmitEmpty();
+        assertTrue(controlled.registered.isEmpty());
+        assertTrue(controlled.isEmpty());
+    }
+
+    @Test
+    void revokingOnePointMustKeepTheOtherMembersOfAnAsyncBatch() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        controlled.commits.add(commit.asMono());
+        controlled.subscribe(List.of("p", "q"));
+        controlled.unsubscribe(List.of("p"));
+        assertEquals(0, controlled.cancelled.get());
+        commit.tryEmitEmpty();
+        assertEquals(List.of(List.of("p", "q")), controlled.batches);
+        assertEquals(Set.of(controlled.get("q")), controlled.registered);
+        assertFalse(controlled.subscribed("p"));
+        assertTrue(controlled.subscribed("q"));
+    }
+
+    @Test
+    void aReplacementMustWaitForItsOldAsyncCommitAndCleanup() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        Sinks.Empty<Void> cleanup = Sinks.empty();
+        controlled.commits.add(commit.asMono());
+        controlled.removals.add(cleanup.asMono());
+        controlled.subscribe(List.of("p", "q"));
+        TestSubscribingPoint old = controlled.get("p");
+        controlled.unsubscribe(List.of("p"));
+        controlled.subscribe(List.of("p"));
+        controlled.unsubscribe(List.of("p"));
+        controlled.subscribe(List.of("p"));
+        assertEquals(1, controlled.batches.size());
+        commit.tryEmitEmpty();
+        assertEquals(1, controlled.batches.size());
+        cleanup.tryEmitEmpty();
+        assertEquals(List.of(List.of("p", "q"), List.of("p")), controlled.batches);
+        assertNotSame(old, controlled.get("p"));
+        assertEquals(Set.of(controlled.get("p"), controlled.get("q")), controlled.registered);
+    }
+
+    @Test
+    void cancellingAnAsyncOperationMustReleasePartiallyRegisteredResources() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        controlled.registerBeforeWait = true;
+        controlled.commits.add(Mono.never());
+        reactor.core.Disposable operation = controlled.subscribeAsync(List.of("p")).subscribe();
+        assertEquals(1, controlled.registered.size());
+        operation.dispose();
+        assertEquals(1, controlled.cancelled.get());
+        assertTrue(controlled.registered.isEmpty());
+        assertTrue(controlled.isEmpty());
+        controlled.subscribe(List.of("p"));
+        assertEquals(Set.of(controlled.get("p")), controlled.registered);
+    }
+
+    @Test
+    void disposeMustCancelAnAsyncCommitAndReleaseItsResources() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        controlled.commits.add(commit.asMono());
+        controlled.subscribe(List.of("p"));
+        controlled.dispose();
+        commit.tryEmitEmpty();
+        assertEquals(1, controlled.cancelled.get());
+        assertTrue(controlled.registered.isEmpty());
+        assertTrue(controlled.isEmpty());
+    }
+
+    @Test
+    void compensationFailureMustBeReportedAndReleaseTheOperationOwnership() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        IllegalStateException failure = new IllegalStateException("unregister failed");
+        controlled.commits.add(commit.asMono());
+        controlled.removals.add(Mono.error(failure));
+        controlled.subscribe(List.of("p", "q"));
+        controlled.unsubscribe(List.of("p"));
+        commit.tryEmitEmpty();
+        verify(mockListener).onSubscribeFailed("p", failure);
+        controlled.subscribe(List.of("p"));
+        assertEquals(2, controlled.batches.size());
+        assertTrue(controlled.subscribed("q"));
+        controlled.dispose();
+    }
+
+    @Test
+    void completedAsyncBatchesMustStillUnregisterNormally() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        controlled.subscribe(List.of("p", "q"));
+        controlled.unsubscribe(List.of("p"));
+        assertEquals(Set.of(controlled.get("q")), controlled.registered);
+        assertTrue(controlled.subscribed("q"));
+        assertEquals(1, controlled.unsubscribeCount);
+    }
+
+    @Test
+    void aReplacementMustAlsoWaitForAnAlreadyCompletedSubscriptionsCleanup() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> cleanup = Sinks.empty();
+        controlled.subscribe(List.of("p", "q"));
+        TestSubscribingPoint old = controlled.get("p");
+        controlled.removals.add(cleanup.asMono());
+        controlled.unsubscribe(List.of("p"));
+        controlled.subscribe(List.of("p"));
+        assertEquals(1, controlled.batches.size());
+        cleanup.tryEmitEmpty();
+        assertNotSame(old, controlled.get("p"));
+        assertEquals(Set.of(controlled.get("p"), controlled.get("q")), controlled.registered);
+    }
+
+    @Test
+    void disposeMustCancelAnAsyncCompensationAlreadyInProgress() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        AtomicInteger cleanupCancelled = new AtomicInteger();
+        controlled.commits.add(commit.asMono());
+        controlled.removals.add(Mono.<Void>never().doOnCancel(cleanupCancelled::incrementAndGet));
+        controlled.subscribe(List.of("p", "q"));
+        controlled.unsubscribe(List.of("p"));
+        commit.tryEmitEmpty();
+        controlled.dispose();
+        assertEquals(1, cleanupCancelled.get());
+        assertTrue(controlled.registered.isEmpty());
+        assertTrue(controlled.isEmpty());
+    }
+
+    private static final class AsyncSubscription extends ControlledSubscription {
+        final Deque<Mono<Void>> commits = new ArrayDeque<>();
+        final Deque<Mono<Void>> removals = new ArrayDeque<>();
+        final List<List<String>> batches = new ArrayList<>();
+        final AtomicInteger cancelled = new AtomicInteger();
+        boolean registerBeforeWait;
+
+        AsyncSubscription(PointListener listener) { super(listener); }
+
+        @Override protected Mono<Void> subscribe(List<TestSubscribingPoint> points) {
+            batches.add(points.stream().map(point -> point.getPoint().getId()).toList());
+            Mono<Void> wait = commits.isEmpty() ? Mono.empty() : commits.removeFirst();
+            Mono<Void> register = super.subscribe(points);
+            return (registerBeforeWait ? register.then(wait) : wait.then(register))
+                .doOnCancel(cancelled::incrementAndGet);
+        }
+
+        @Override protected Mono<Void> unsubscribe(List<TestSubscribingPoint> points) {
+            Mono<Void> wait = removals.isEmpty() ? Mono.empty() : removals.removeFirst();
+            return wait.then(Mono.fromRunnable(() -> {
+                // Some protocols address deletion by point ID, so old cleanup must precede a replacement.
+                Set<String> ids = new HashSet<>();
+                points.forEach(point -> ids.add(point.getPoint().getId()));
+                registered.removeIf(point -> ids.contains(point.getPoint().getId()));
+                unsubscribeCount += points.size();
+            }));
+        }
+    }
+
+    private static class ControlledSubscription extends TestPointSubscription {
         final Map<String, Deque<Mono<TestPointRuntime>>> lookups = new HashMap<>();
         final Set<TestSubscribingPoint> registered = new HashSet<>();
         int subscribeCount;
