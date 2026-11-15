@@ -370,6 +370,11 @@ class AbstractPointSubscriptionTest {
         assertTrue(controlled.isEmpty());
         assertTrue(controlled.registered.isEmpty());
         assertEquals(1, controlled.subscribeCount);
+        assertEquals(2, controlled.lookupCount);
+        verify(mockListener).onSubscribeFailed(eq("after-close"), argThat(error ->
+            CollectorUtils.inferErrorCode(error) == InternalStatusCode.Bad_ChannelError.getCode()
+                && "error.channel_error".equals(CollectorUtils.reasonOf(error))));
+        verifyNoMoreInteractions(mockListener);
     }
 
     @Test
@@ -455,12 +460,14 @@ class AbstractPointSubscriptionTest {
         final Set<TestSubscribingPoint> registered = new HashSet<>();
         int subscribeCount;
         int unsubscribeCount;
+        int lookupCount;
 
         ControlledSubscription(PointListener listener) { super(listener); }
         void nextLookup(String id, Mono<TestPointRuntime> lookup) {
             lookups.computeIfAbsent(id, ignore -> new ArrayDeque<>()).add(lookup);
         }
         @Override public Mono<TestPointRuntime> getPointRuntime(String id) {
+            lookupCount++;
             Deque<Mono<TestPointRuntime>> queued = lookups.get(id);
             return queued == null || queued.isEmpty() ? Mono.just(new TestPointRuntime(id)) : queued.removeFirst();
         }

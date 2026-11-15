@@ -3,6 +3,8 @@ package org.jetlinks.collector.subscribe;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.jetlinks.collector.DataCollectorProvider;
+import org.jetlinks.collector.InternalStatusCode;
+import org.jetlinks.collector.exception.CollectorFailure;
 import org.jetlinks.core.monitor.Monitor;
 import reactor.core.Disposable;
 import reactor.core.Disposables;
@@ -138,6 +140,13 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
 
     protected final Mono<Void> subscribeAsync(Collection<String> points) {
         return Mono.defer(() -> {
+            if (isDisposed()) {
+                CollectorFailure error = new CollectorFailure(InternalStatusCode.Bad_ChannelError, "error.channel_error");
+                for (String id : points) {
+                    listener.onSubscribeFailed(id, error);
+                }
+                return Mono.empty();
+            }
             Disposable.Composite loading = Disposables.composite();
             return Flux.fromIterable(points)
                        .flatMap(id -> lookup(id, loading))
