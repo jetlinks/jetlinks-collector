@@ -3,7 +3,8 @@ package org.jetlinks.collector.serial;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
-import reactor.core.Exceptions;
+import org.jetlinks.collector.CollectorUtils;
+import org.jetlinks.collector.InternalStatusCode;
 import reactor.test.StepVerifier;
 import reactor.util.concurrent.Queues;
 
@@ -23,7 +24,10 @@ class DirectPayloadParserTest {
             parser.handle(frame);
         }
         StepVerifier.create(parser.handlePayload())
-                    .expectErrorMatches(Exceptions::isOverflow)
+                    .expectErrorSatisfies(error -> {
+                        assertEquals(InternalStatusCode.Bad_TooManyOperations.getCode(), CollectorUtils.inferErrorCode(error));
+                        assertEquals("error.channel_busy", CollectorUtils.reasonOf(error));
+                    })
                     .verify();
         frames.forEach(frame -> assertEquals(0, frame.refCnt()));
     }

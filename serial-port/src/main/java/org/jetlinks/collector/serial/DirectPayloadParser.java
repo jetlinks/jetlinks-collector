@@ -2,7 +2,8 @@ package org.jetlinks.collector.serial;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.util.ReferenceCountUtil;
-import reactor.core.Exceptions;
+import org.jetlinks.collector.InternalStatusCode;
+import org.jetlinks.collector.exception.CollectorFailure;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.util.concurrent.Queues;
@@ -32,7 +33,7 @@ public class DirectPayloadParser implements PayloadParser {
             if (emitted == Sinks.EmitResult.FAIL_OVERFLOW || emitted == Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
                 // 丢失一帧后不能假装后续帧仍构成完整响应，清空并终止本解析器。
                 releaseQueued();
-                sinks.tryEmitError(Exceptions.failWithOverflow("error.serial_receive_queue_full"));
+                sinks.tryEmitError(new CollectorFailure(InternalStatusCode.Bad_TooManyOperations, "error.channel_busy"));
             }
         }
     }
