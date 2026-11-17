@@ -147,7 +147,8 @@ class SerialRequestCleanupTest {
 
     @Test
     void cancellingDuringBlockedWriteDoesNotBlockOrAllowQueuedWorkToStart() throws Exception {
-        try (Fixture fixture = new Fixture(); var workers = Executors.newFixedThreadPool(2)) {
+        var workers = Executors.newFixedThreadPool(2);
+        try (Fixture fixture = new Fixture()) {
             when(fixture.config.getCommunicationInterval()).thenReturn(Duration.ofMillis(20));
             AtomicReference<Throwable> queuedError = new AtomicReference<>();
             Disposable active = fixture.client.sendAndReceive(Unpooled.buffer(1).writeByte(1), Duration.ofSeconds(5))
@@ -178,6 +179,8 @@ class SerialRequestCleanupTest {
             }
             sending.get(5, TimeUnit.SECONDS);
             assertEquals(0, fixture.scheduler.liveTimeouts.get());
+        } finally {
+            workers.shutdownNow();
         }
     }
 
