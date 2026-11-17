@@ -63,7 +63,7 @@ class SerialTransportMetricsTest {
             assertEquals(1, metrics.getAckTimeouts());assertEquals(1, metrics.getRequestErrors());
             assertEquals(0, metrics.getPendingMessages());
             client.serialEvent(new SerialPortEvent(port, SerialPort.LISTENING_EVENT_PORT_DISCONNECTED));
-            assertEquals(0, metrics.getActiveConnections());verify(registration).dispose();
+            assertTrue(client.isDisposed());verify(registration).dispose();
         } finally { client.dispose(); }
     }
 }
