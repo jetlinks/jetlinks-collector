@@ -7,12 +7,12 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.jetlinks.collector.InternalStatusCode;
+import org.jetlinks.collector.exception.CollectorFailure;
 import org.jetlinks.core.monitor.Monitor;
+import org.jetlinks.core.monitor.logger.Logger;
 import org.jetlinks.core.server.ConnectionMetrics;
 import org.jetlinks.core.server.ConnectionMetricsRecorder;
-import org.slf4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.Disposables;
 import reactor.core.publisher.Flux;
@@ -24,7 +24,7 @@ import reactor.core.scheduler.Schedulers;
 import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
@@ -34,7 +34,6 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
  * 单串口的有界请求队列与帧接收客户端，统一记录实际收发字节和请求耗时。
  * 实例持有观测对象；关闭时注销观测并释放请求、解析器及串口资源。
  */
-@Slf4j
 public class DefaultSerialPortClient implements
     SerialPortClient, SerialPortDataListenerWithExceptions {
     private static final AtomicReferenceFieldUpdater<DefaultSerialPortClient, PendingRequest>
@@ -59,8 +58,6 @@ public class DefaultSerialPortClient implements
 
     private final Scheduler scheduler;
 
-    private final int maxQueueSize;
-    private final Monitor monitor;
     private final Logger logger;
     // 串口层统一记录实际帧字节，协议插件无需再次估算 Modbus／其他协议的流量。
     private final ConnectionMetricsRecorder metrics = new ConnectionMetricsRecorder() {
@@ -92,21 +89,10 @@ public class DefaultSerialPortClient implements
         this.port = port;
         this.parser = parser;
         this.out = port.getOutputStream();
-        this.maxQueueSize = maxQueueSize;
+        this.logger = monitor.logger();
+        this.queue = new ArrayBlockingQueue<>(maxQueueSize);
         this.scheduler = Schedulers.single(Schedulers.boundedElastic());
         this.disposable.add(scheduler);
-        this.disposable.add(
-            parser
-                .handlePayload()
-                .subscribe(this::handleBuffer)
-        );
-        this.monitor = monitor;
-        if (this.monitor != Monitor.noop()) {
-            this.logger = this.monitor.logger().slf4j();
-        } else {
-            this.logger = log;
-        }
-        this.queue = new ConcurrentLinkedQueue<>();
         if (!port.isOpen()) {
             port.openPort();
         }
@@ -121,6 +107,11 @@ public class DefaultSerialPortClient implements
             metrics.connectFailed();
         }
         disposable.add(monitor.metrics().observe("transport", ConnectionMetrics.class, metrics));
+        this.disposable.add(parser.handlePayload().subscribe(this::handleBuffer, error -> {
+            catchException(error instanceof Exception exception
+                ? exception : new IllegalStateException("error.handle_serial_port_error", error));
+            dispose();
+        }));
     }
 
     @Override
@@ -131,42 +122,48 @@ public class DefaultSerialPortClient implements
     @Override
     public Mono<ByteBuf> sendAndReceive(ByteBuf buf, Duration timeout) {
         return metrics.recordRequest(this
-            .sendAndReceiveMulti(buf, timeout, true)
+            .receive(buf, timeout, 1)
             .singleOrEmpty(), error -> error instanceof RequestTimeoutException);
     }
 
     @Override
     public Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout, int num) {
         return this
-            .sendAndReceiveMulti(buf, timeout)
+            .receive(buf, timeout, num)
             .take(num);
     }
 
     @Override
     public boolean isConnected() {
-        return port.isOpen();
+        return !isDisposed() && port.isOpen();
     }
 
-    private Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout, boolean single) {
+    private Flux<ByteBuf> receive(ByteBuf buf, Duration timeout, int responses) {
         return Flux
             .<ByteBuf>create(sink -> {
                 if (!port.isOpen() || isDisposed()) {
+                    ReferenceCountUtil.safeRelease(buf);
                     sink.error(new PortClosedException(getPath()));
                     return;
                 }
-                PendingRequest request = new PendingRequest(buf, sink, timeout, single);
+                PendingRequest request = new PendingRequest(buf, sink, timeout, responses);
                 sink.onDispose(request);
 
-                if (queue.size() >= maxQueueSize || !queue.offer(request)) {
-                    sink.error(new IllegalStateException("queue is full"));
+                if (!queue.offer(request)) {
+                    request.fail(channelBusy());
+                } else if (isDisposed()) {
+                    sink.error(new PortClosedException(getPath()));
+                } else if (request.isDisposed()) {
+                    queue.remove(request);
                 }
                 drain();
-            });
+            }, FluxSink.OverflowStrategy.ERROR)
+            .doOnDiscard(ByteBuf.class, ReferenceCountUtil::safeRelease);
     }
 
     @Override
     public Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout) {
-        return sendAndReceiveMulti(buf, timeout, false);
+        return receive(buf, timeout, -1);
     }
 
     private void drain() {
@@ -198,12 +195,17 @@ public class DefaultSerialPortClient implements
                 }
                 if (PENDING.compareAndSet(this, null, request)) {
                     //独立线程发起请求,防止阻塞请求线程
-                    scheduler.schedule(
-                        request::sendRequest,
-                        config.getCommunicationInterval().toNanos(),
-                        TimeUnit.NANOSECONDS);
+                    try {
+                        scheduler.schedule(request::sendRequest,
+                                           config.getCommunicationInterval().toNanos(),
+                                           TimeUnit.NANOSECONDS);
+                    } catch (RejectedExecutionException error) {
+                        request.fail(new PortClosedException(getPath()));
+                    }
                 } else {
-                    queue.add(request);
+                    if (!queue.offer(request)) {
+                        request.fail(channelBusy());
+                    }
                 }
             }
             missed = WIP.addAndGet(this, -missed);
@@ -214,8 +216,9 @@ public class DefaultSerialPortClient implements
     @Override
     public void catchException(Exception e) {
         logger.error("handle serial port payload error", e);
-        if (pending != null && !pending.isDisposed()) {
-            pending.sink.error(new IllegalStateException("error.handle_serial_port_error", e));
+        PendingRequest request = PENDING.get(this);
+        if (request != null) {
+            request.fail(new IllegalStateException("error.handle_serial_port_error", e));
         }
     }
 
@@ -234,13 +237,13 @@ public class DefaultSerialPortClient implements
         if (event.getEventType() == SerialPort.LISTENING_EVENT_DATA_RECEIVED) {
             metrics.received(event.getReceivedData().length);
 
-            if (logger.isInfoEnabled()) {
-                logger.info("received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
+            if (logger.isDebugEnabled()) {
+                logger.debug("received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
             }
 
             PendingRequest pending = PENDING.get(this);
             if (pending == null || pending.isDisposed()) {
-                logger.warn("request is canceled! received data: {}", ByteBufUtil.hexDump(event.getReceivedData()));
+                logger.debug("SerialPort [{}] received data without an active request", getPath());
                 return;
             }
             parser.handle(Unpooled.wrappedBuffer(event.getReceivedData()));
@@ -260,6 +263,8 @@ public class DefaultSerialPortClient implements
 
             pending.complete(buffer);
 
+        } else {
+            ReferenceCountUtil.safeRelease(buffer);
         }
 
         drain();
@@ -267,7 +272,11 @@ public class DefaultSerialPortClient implements
 
     @Override
     public void dispose() {
+        if (isDisposed()) {
+            return;
+        }
         disposable.dispose();
+        parser.close();
         try {
             port.closePort();
         } catch (Throwable ignore) {
@@ -275,7 +284,7 @@ public class DefaultSerialPortClient implements
         }
         PendingRequest pending = PENDING.getAndSet(this, null);
         if (pending != null && !pending.isCancelled()) {
-            pending.sink.error(new PortClosedException(getPath()));
+            pending.fail(new PortClosedException(getPath()));
         }
         for (; ; ) {
             pending = queue.poll();
@@ -285,7 +294,7 @@ public class DefaultSerialPortClient implements
             if (pending.isCancelled()) {
                 continue;
             }
-            pending.sink.error(new PortClosedException(getPath()));
+            pending.fail(new PortClosedException(getPath()));
         }
 
     }
@@ -295,12 +304,27 @@ public class DefaultSerialPortClient implements
         return disposable.isDisposed();
     }
 
-    @AllArgsConstructor
+    private static CollectorFailure channelBusy() {
+        return new CollectorFailure(InternalStatusCode.Bad_TooManyOperations, "error.channel_busy");
+    }
+
     class PendingRequest implements Disposable {
-        ByteBuf request;
-        FluxSink<ByteBuf> sink;
-        Duration requestTimeout;
-        boolean single;
+        final ByteBuf request;
+        final FluxSink<ByteBuf> sink;
+        final Duration requestTimeout;
+        private int remaining;
+        private boolean sent;
+        private boolean completed;
+        private boolean emitting;
+        private volatile boolean terminated;
+        private volatile Disposable timeout;
+
+        PendingRequest(ByteBuf request, FluxSink<ByteBuf> sink, Duration requestTimeout, int responses) {
+            this.request = request;
+            this.sink = sink;
+            this.requestTimeout = requestTimeout;
+            this.remaining = responses;
+        }
 
         public boolean isCancelled() {
             return isDisposed();
@@ -308,65 +332,130 @@ public class DefaultSerialPortClient implements
 
         @Override
         public boolean isDisposed() {
-            return ReferenceCountUtil.refCnt(request) == 0;
+            return terminated;
         }
 
         @Override
         public void dispose() {
-            try {
-                PENDING.compareAndSet(DefaultSerialPortClient.this, this, null);
-                if (isDisposed()) {
+            synchronized (this) {
+                if (terminated) {
                     return;
                 }
-                ReferenceCountUtil.safeRelease(request);
-            } finally {
+                terminated = true;
+                // take/single 可在 next 中同步取消，等本次通知退出后再清理资源。
+                if (emitting) {
+                    return;
+                }
+            }
+            cleanup();
+        }
+
+        private void fail(Throwable error) {
+            boolean deferCleanup;
+            synchronized (this) {
+                if (terminated) {
+                    return;
+                }
+                terminated = true;
+                deferCleanup = emitting;
+            }
+            if (!deferCleanup) {
+                cleanup();
+            }
+            sink.error(error);
+        }
+
+        private void cleanup() {
+            queue.remove(this);
+            Disposable timer = timeout;
+            if (timer != null) {
+                timer.dispose();
+            }
+            ReferenceCountUtil.safeRelease(request);
+            if (sent && !completed) {
+                // 串口响应没有通用关联号。可能已发出的请求被中断后，不能让迟到帧匹配下一请求。
+                // 保留 pending 到客户端失效，由上层既有连接恢复流程重新建立会话。
+                DefaultSerialPortClient.this.dispose();
+            } else {
+                PENDING.compareAndSet(DefaultSerialPortClient.this, this, null);
                 drain();
             }
         }
 
         public void complete(ByteBuf buf) {
-            sink.next(buf);
-            if (single) {
-                sink.complete();
+            boolean overflow;
+            boolean cleanup;
+            synchronized (this) {
+                if (terminated || !sent) {
+                    ReferenceCountUtil.safeRelease(buf);
+                    return;
+                }
+                overflow = sink.requestedFromDownstream() == 0;
+                if (overflow) {
+                    cleanup = false;
+                } else {
+                    // 收齐标记必须先于 next，避免下游 take 的同步取消被当成未完成请求。
+                    completed = remaining > 0 && --remaining == 0;
+                    emitting = true;
+                    try {
+                        sink.next(buf);
+                        if (completed) {
+                            sink.complete();
+                        }
+                    } finally {
+                        emitting = false;
+                    }
+                    cleanup = terminated;
+                }
+            }
+            if (overflow) {
+                ReferenceCountUtil.safeRelease(buf);
+                fail(channelBusy());
+            } else if (cleanup) {
+                cleanup();
             }
         }
 
         private void sendRequest() {
             try {
-                byte[] payload = ByteBufUtil.getBytes(request);
+                byte[] payload;
+                synchronized (this) {
+                    if (terminated || DefaultSerialPortClient.this.isDisposed()) {
+                        return;
+                    }
+                    payload = ByteBufUtil.getBytes(request);
+                    // 提交发送后取消按“可能已上线路”处理；不持锁执行阻塞串口 IO。
+                    sent = true;
+                }
 
                 if (logger.isDebugEnabled()) {
                     logger.debug("request SerialPort [{}] data:{}",
                                  port.getSystemPortPath(),
                                  ByteBufUtil.hexDump(payload));
                 }
+                if (isDisposed()) {
+                    return;
+                }
                 out.write(payload);
                 metrics.sent(payload.length);
-                if (logger.isInfoEnabled()) {
-                    logger.info("write SerialPort [{}] data: {}",
-                                port.getSystemPortPath(),
-                                ByteBufUtil.hexDump(payload));
-                }
                 if (!isDisposed()) {
-                    //请求超时处理
-                    scheduler.schedule(
-                        () -> {
-                            //超时未获取到数据,重置粘拆包处理器.
-                            if (!isDisposed()) {
-                                parser.reset();
-                            }
-                            sink.error(new RequestTimeoutException(getPath()));
-                        },
+                    Disposable timer = scheduler.schedule(
+                        () -> fail(new RequestTimeoutException(getPath())),
                         requestTimeout.toMillis(),
                         TimeUnit.MILLISECONDS);
+                    timeout = timer;
+                    // 响应/取消可能先于 schedule 返回，不能把已结束请求重新留在定时队列里。
+                    if (isDisposed()) {
+                        timer.dispose();
+                    }
                 }
             } catch (RejectedExecutionException e) {
-                logger.info("write SerialPort [{}] rejected {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
-                sink.complete();
+                logger.debug("write SerialPort [{}] rejected", port.getSystemPortPath(), e);
+                fail(new PortClosedException(getPath()));
             } catch (Throwable e) {
                 metrics.transportError();
-                logger.warn("write SerialPort [{}] failed {}", port.getSystemPortPath(), ByteBufUtil.hexDump(request), e);
-                sink.error(new IllegalStateException("error.serial_port_error", e));
+                logger.warn("write SerialPort [{}] failed", port.getSystemPortPath(), e);
+                fail(new IllegalStateException("error.serial_port_error", e));
             }
         }
     }

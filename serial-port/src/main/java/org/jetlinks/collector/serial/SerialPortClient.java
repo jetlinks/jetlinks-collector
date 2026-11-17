@@ -33,7 +33,8 @@ public interface SerialPortClient extends Disposable {
     String getPath();
 
     /**
-     * 发送数据并接收响应
+     * 发送数据并接收响应。客户端接管请求引用，调用方负责释放收到的完整响应。
+     * 已发送请求在收到完整响应前被取消或超时，将关闭当前客户端会话以隔离迟到帧；由上层恢复连接。
      *
      * @param buf     数据
      * @param timeout 超时时间,数据发送到串口后等待响应的超时时间
@@ -44,20 +45,20 @@ public interface SerialPortClient extends Disposable {
     Mono<ByteBuf> sendAndReceive(ByteBuf buf, Duration timeout);
 
     /**
-     * 发送并接收多个响应,直到超时时间到达.
+     * 发送并接收多个响应。未指定帧数时，取消或超时均视为未完成并关闭会话。
      *
      * @param buf     请求数据
-     * @param timeout 超时时间,超时未获取到数据时将返回empty.
+     * @param timeout 发送后等待响应的超时时间，超时以 {@link RequestTimeoutException} 结束。
      * @return 响应数据
      */
     Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout);
 
     /**
-     * 发送并接收多个响应,直到超时时间到达.
+     * 发送并接收多个响应。
      *
      * @param buf     请求数据
-     * @param timeout 超时时间,超时未获取到数据时将返回empty.
-     * @param num     收取响应报文的数量限制，收完即停
+     * @param timeout 发送后等待响应的超时时间，超时以 {@link RequestTimeoutException} 结束。
+     * @param num     预期完整响应帧数，收齐后可复用会话；未收齐时取消或超时将关闭会话。
      * @return 响应数据
      */
     Flux<ByteBuf> sendAndReceiveMulti(ByteBuf buf, Duration timeout, int num);

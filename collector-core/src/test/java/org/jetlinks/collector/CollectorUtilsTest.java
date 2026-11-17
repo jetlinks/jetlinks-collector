@@ -122,6 +122,46 @@ class CollectorUtilsTest {
     }
 
     @Test
+    void wrappedDeclaredFailureKeepsItsCodeAndReason() {
+        Throwable error = new IllegalStateException("error.handle_serial_port_error",
+            new java.util.concurrent.CompletionException(new CollectorFailure(
+                InternalStatusCode.Bad_TooManyOperations, "error.channel_busy")));
+
+        Result<Void> result = Result.error(error);
+
+        assertEquals(InternalStatusCode.Bad_TooManyOperations.getCode(), result.getCode());
+        assertEquals("error.channel_busy", result.getHeader(CollectorConstants.Headers.reason).orElse(null));
+    }
+
+    @Test
+    void wrappedCollectorExceptionKeepsItsDeclaredCode() {
+        Throwable error = new RuntimeException(new CollectorException(
+            "collector", InternalStatusCode.Bad_ConnectionLost, "error.connection_lost"));
+
+        assertEquals(InternalStatusCode.Bad_ConnectionLost.getCode(), CollectorUtils.inferErrorCode(error));
+        assertEquals("error.connection_lost", CollectorUtils.reasonOf(error));
+    }
+
+    @Test
+    void outerDeclaredFailureWinsOverItsCause() {
+        Throwable error = new CollectorFailure(InternalStatusCode.Bad_DeviceError, "error.device_error",
+            new CollectorFailure(InternalStatusCode.Bad_TooManyOperations, "error.channel_busy"));
+
+        assertEquals(InternalStatusCode.Bad_DeviceError.getCode(), CollectorUtils.inferErrorCode(error));
+        assertEquals("error.device_error", CollectorUtils.reasonOf(error));
+    }
+
+    @Test
+    void circularCausesDoNotRecurseOrChangeOrdinaryInference() {
+        Throwable outer = new IllegalStateException("ordinary wrapper");
+        Throwable inner = new RuntimeException("inner", outer);
+        outer.initCause(inner);
+
+        assertEquals(InternalStatusCode.Bad_InvalidParameter.getCode(), CollectorUtils.inferErrorCode(outer));
+        assertEquals("error.invalid_parameter", CollectorUtils.reasonOf(outer));
+    }
+
+    @Test
     void pointAndChannelExceptionsCarryTheirStatus() {
         Result<Void> point = Result.error(new PointException(
             "holding-0", InternalStatusCode.Bad_ObjectDeleted, "error.modbus_point_disposed"));

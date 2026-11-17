@@ -111,16 +111,32 @@ public abstract class AbstractSequencedTcpClientLifecycle<REQ, RES extends Seque
 
 
     public Mono<RES> request(REQ request) {
+        // 握手完成后再分配业务序列号；握手本身也可能使用相同的序列空间。
+        return Mono.defer(this::connect).flatMap(connection -> request(connection, request));
+    }
+
+    /**
+     * 在当前初始化的连接上执行认证、会话协商等请求，复用相同的应答关联及取消清理。
+     * 初始化回调不能再次等待 connect()，否则会等待自身完成握手。
+     * 普通业务请求仍应调用 {@link #request(Object)}，以等待连接就绪。
+     *
+     * @param connection 正在初始化的连接
+     * @param request 握手请求
+     * @return 关联的响应
+     * @since 1.0.2
+     * @see #afterInitConnection(Connection)
+     */
+    protected final Mono<RES> request(Connection connection, REQ request) {
         return Mono
             .<RES>create(sink -> {
                 ID number = nextRequestSequenceNumber();
                 pendingRequests.put(number, sink);
                 @SuppressWarnings("all")
-                Disposable outbound = connect()
-                    .flatMap(c -> c
-                        .outbound()
-                        .sendObject(handleOutbound(number, request))
-                        .then())
+                // 编码可能同步抛错，必须进入发送链路，确保仍能安装并执行 pending 清理。
+                Disposable outbound = Mono.defer(() -> connection
+                    .outbound()
+                    .sendObject(handleOutbound(number, request))
+                    .then())
                     .subscribe(ignore -> {
                     }, sink::error);
 

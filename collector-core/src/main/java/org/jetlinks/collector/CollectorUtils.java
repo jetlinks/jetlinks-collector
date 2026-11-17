@@ -16,6 +16,9 @@ import java.sql.SQLException;
 import java.text.ParseException;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
 import javax.naming.AuthenticationException;
@@ -58,7 +61,8 @@ public class CollectorUtils {
      * 结果原因：优先用异常自带的键，否则按推断出的状态码给一个平台 {@code error.*} 键。
      */
     public static String reasonOf(Throwable error) {
-        String key = reasonKey(error);
+        Throwable declared = declaredFailure(error);
+        String key = reasonKey(declared == null ? error : declared);
         if (key != null) {
             return key;
         }
@@ -69,11 +73,12 @@ public class CollectorUtils {
         if (error == null) {
             return InternalStatusCode.Bad_InternalError.getCode();
         }
-        // 插件已经选好的状态码优先于按消息猜。
-        if (error instanceof CollectorFailure failure && failure.getStatusCode() != 0) {
+        // 通信/异步包装不能覆盖插件已声明的状态；从外到内，业务封装的明确状态优先。
+        Throwable declared = declaredFailure(error);
+        if (declared instanceof CollectorFailure failure) {
             return failure.getStatusCode();
         }
-        if (error instanceof CollectorException collectorException && collectorException.getCode() != 0) {
+        if (declared instanceof CollectorException collectorException) {
             return collectorException.getCode();
         }
         Long fromKey = codeFromKey(reasonKey(error));
@@ -253,6 +258,18 @@ public class CollectorUtils {
 
         // === 默认返回内部错误 ===
         return InternalStatusCode.Bad_InternalError.getCode();
+    }
+
+    private static Throwable declaredFailure(Throwable error) {
+        // 仅错误映射时遍历明确状态；按对象去重，循环 cause 不递归或按消息猜深层错误。
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = error; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof CollectorFailure failure && failure.getStatusCode() != 0
+                || cause instanceof CollectorException exception && exception.getCode() != 0) {
+                return cause;
+            }
+        }
+        return null;
     }
 
     private static boolean isReasonKey(String token) {
