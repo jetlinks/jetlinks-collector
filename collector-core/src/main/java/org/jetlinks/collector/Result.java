@@ -10,7 +10,6 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
-import java.util.HashMap;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -122,8 +121,9 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         }
         this.addHeader("errorType", error.getClass().getCanonicalName());
         this.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
-        this.withReason(CollectorUtils.reasonOf(error));
-        this.setCode(CollectorUtils.inferErrorCode(error));
+        long code = CollectorUtils.inferErrorCode(error);
+        this.withReason(CollectorUtils.reasonOf(error, code));
+        this.setCode(code);
         return this;
     }
 
@@ -132,7 +132,7 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         result.setSuccess(this.isSuccess());
         result.setCode(this.getCode());
         if (this.getHeaders() != null) {
-            result.setHeaders(new HashMap<>(this.getHeaders()));
+            result.setHeaders(new ConcurrentHashMap<>(this.getHeaders()));
         }
         result.setData(data);
         return result;

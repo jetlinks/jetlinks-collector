@@ -21,6 +21,7 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 import javax.naming.AuthenticationException;
 
 /**
@@ -28,6 +29,8 @@ import javax.naming.AuthenticationException;
  * 提供错误码编码、解码等工具方法
  */
 public class CollectorUtils {
+
+    private static final Pattern REASON_KEY = Pattern.compile("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+");
 
     /**
      * 根据异常类型推断对应的错误状态码
@@ -67,6 +70,12 @@ public class CollectorUtils {
             return key;
         }
         return genericReason(inferErrorCode(error));
+    }
+
+    static String reasonOf(Throwable error, long code) {
+        Throwable declared = declaredFailure(error);
+        String key = reasonKey(declared == null ? error : declared);
+        return key == null ? genericReason(code) : key;
     }
 
     public static long inferErrorCode(Throwable error) {
@@ -273,7 +282,7 @@ public class CollectorUtils {
     }
 
     private static boolean isReasonKey(String token) {
-        return token != null && token.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+");
+        return token != null && REASON_KEY.matcher(token).matches();
     }
 
     /**

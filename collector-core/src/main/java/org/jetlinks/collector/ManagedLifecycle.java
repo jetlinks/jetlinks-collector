@@ -93,7 +93,11 @@ public abstract class ManagedLifecycle<
     protected void handleLoaded(T loaded) {
 
         loaded.onStateChanged(this);
-        loaded.start();
+        if (isPaused()) {
+            loaded.pause();
+        } else {
+            loaded.start();
+        }
 
     }
 
@@ -272,9 +276,6 @@ public abstract class ManagedLifecycle<
         if (isDisposed()) {
             return CollectorConstants.States.stopped;
         }
-        if (isPaused()) {
-            return CollectorConstants.States.paused;
-        }
         State managedState = MANAGED_STATE.get(this);
         return managedState == null ? state() : managedState;
     }
@@ -289,19 +290,22 @@ public abstract class ManagedLifecycle<
     }
 
     public void start() {
-
+        if (!isDisposed() && MANAGED_STATE.getAndSet(this, null) == CollectorConstants.States.paused) {
+            T loaded = this.loaded;
+            if (loaded != null) {
+                loaded.start();
+            }
+        }
     }
 
     @Override
     public void pause() {
+        MANAGED_STATE.set(this, CollectorConstants.States.paused);
         T loaded = this.loaded;
         if (loaded != null) {
             loaded.pause();
-        } else {
-            tryLoad()
-                .subscribe(Lifecycle::pause);
         }
-        pause.update(Disposables.disposed());
+        pause.update(null);
     }
 
     @Override
@@ -315,7 +319,7 @@ public abstract class ManagedLifecycle<
     }
 
     public boolean isPaused() {
-        return pause.isDisposed();
+        return MANAGED_STATE.get(this) == CollectorConstants.States.paused;
     }
 
     @Override
