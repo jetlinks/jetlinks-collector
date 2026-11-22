@@ -45,8 +45,13 @@ public abstract class AbstractDataCollectorProvider extends AnnotationCommandSup
         if (!path.startsWith("/")) {
             path = "/" + path;
         }
+        ClassPathResource resource = new ClassPathResource(provider + path, clazz.getClassLoader());
+        // 归一化后的路径必须留在插件目录内；越界和缺失资源均交由接口返回404。
+        if (!resource.getPath().startsWith(provider + "/") || !resource.exists()) {
+            return Flux.empty();
+        }
         return DataBufferUtils
-            .read(new ClassPathResource(provider + path, clazz.getClassLoader()),
+            .read(resource,
                   new NettyDataBufferFactory(ByteBufAllocator.DEFAULT),
                   4096);
     }
