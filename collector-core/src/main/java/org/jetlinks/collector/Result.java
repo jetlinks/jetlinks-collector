@@ -10,8 +10,10 @@ import java.io.Externalizable;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * 数采相关操作结果
@@ -21,6 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Getter
 @Setter
 public class Result<T> extends GenericHeaderSupport<Result<T>> implements Externalizable {
+
+    @Getter(lombok.AccessLevel.NONE)
+    @Setter(lombok.AccessLevel.NONE)
+    private volatile boolean headersExposed;
 
     /**
      * 数据
@@ -96,7 +102,7 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         Result<T> result = new Result<>();
         result.setSuccess(false);
         result.addHeader("errorType", error.getClass().getCanonicalName());
-        result.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
+        result.errorStack(error);
         result.setCode(code);
         return result;
     }
@@ -120,7 +126,7 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
             return this;
         }
         this.addHeader("errorType", error.getClass().getCanonicalName());
-        this.addHeader("errorStack", ExceptionUtils.getStackTrace(error));
+        this.errorStack(error);
         long code = CollectorUtils.inferErrorCode(error);
         this.withReason(CollectorUtils.reasonOf(error, code));
         this.setCode(code);
@@ -131,11 +137,82 @@ public class Result<T> extends GenericHeaderSupport<Result<T>> implements Extern
         Result<NEW> result = new Result<>();
         result.setSuccess(this.isSuccess());
         result.setCode(this.getCode());
-        if (this.getHeaders() != null) {
-            result.setHeaders(new ConcurrentHashMap<>(this.getHeaders()));
+        Map<String, Object> headers = super.getHeaders();
+        if (headers != null) {
+            result.copyHeaders(headers);
         }
         result.setData(data);
         return result;
+    }
+
+    /** 单独读取原因/点位不展开堆栈；暴露整个头 Map 或序列化时保持 String 值契约。 */
+    @Override
+    public Map<String, Object> getHeaders() {
+        if (super.getHeaders() == null) {
+            return null;
+        }
+        if (!headersExposed) {
+            synchronized (this) {
+                if (!headersExposed) {
+                    headerValue(super.getHeaders(), "errorStack");
+                    headersExposed = true;
+                }
+            }
+        }
+        return super.getHeaders();
+    }
+
+    @Override
+    public synchronized void setHeaders(Map<String, Object> headers) {
+        // 外部可能继续持有同一个 ConcurrentHashMap，不能向已暴露的 Map 写入延迟值。
+        headersExposed = true;
+        super.setHeaders(headers);
+    }
+
+    private void copyHeaders(Map<String, Object> headers) {
+        super.setHeaders(new ConcurrentHashMap<>(headers));
+    }
+
+    private synchronized void errorStack(Throwable error) {
+        addHeader("errorStack", headersExposed ? ExceptionUtils.getStackTrace(error) : new ErrorStack(error));
+    }
+
+    @Override
+    public Object getHeaderOrElse(String header, Supplier<Object> orElse) {
+        Object value = header == null ? null : headerValue(super.getHeaders(), header);
+        return value == null && orElse != null ? orElse.get() : value;
+    }
+
+    private static Object headerValue(Map<String, Object> headers, String key) {
+        Object value = headers == null ? null : headers.get(key);
+        if (value instanceof ErrorStack stack) {
+            String text = stack.get();
+            headers.replace(key, value, text);
+            return text;
+        }
+        return value;
+    }
+
+    /** 结果副本共享一次计算，完成后释放 Throwable；不建立全局缓存。 */
+    private static final class ErrorStack {
+        private Throwable error;
+        private volatile String text;
+
+        ErrorStack(Throwable error) { this.error = error; }
+
+        String get() {
+            String value = text;
+            if (value == null) {
+                synchronized (this) {
+                    value = text;
+                    if (value == null) {
+                        text = value = ExceptionUtils.getStackTrace(error);
+                        error = null;
+                    }
+                }
+            }
+            return value;
+        }
     }
 
     @Override

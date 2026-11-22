@@ -270,9 +270,20 @@ public class CollectorUtils {
     }
 
     private static Throwable declaredFailure(Throwable error) {
+        if (error == null) {
+            return null;
+        }
+        if (error instanceof CollectorFailure failure && failure.getStatusCode() != 0
+            || error instanceof CollectorException exception && exception.getCode() != 0) {
+            return error;
+        }
+        Throwable cause = error.getCause();
+        if (cause == null) {
+            return null;
+        }
         // 仅错误映射时遍历明确状态；按对象去重，循环 cause 不递归或按消息猜深层错误。
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Throwable cause = error; cause != null && seen.add(cause); cause = cause.getCause()) {
+        for (; cause != null && seen.add(cause); cause = cause.getCause()) {
             if (cause instanceof CollectorFailure failure && failure.getStatusCode() != 0
                 || cause instanceof CollectorException exception && exception.getCode() != 0) {
                 return cause;
@@ -282,7 +293,7 @@ public class CollectorUtils {
     }
 
     private static boolean isReasonKey(String token) {
-        return token != null && REASON_KEY.matcher(token).matches();
+        return token != null && token.indexOf('.') > 0 && REASON_KEY.matcher(token).matches();
     }
 
     /**

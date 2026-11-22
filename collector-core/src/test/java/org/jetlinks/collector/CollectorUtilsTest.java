@@ -12,6 +12,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CollectorUtilsTest {
@@ -159,6 +160,30 @@ class CollectorUtilsTest {
 
         assertEquals(InternalStatusCode.Bad_InvalidParameter.getCode(), CollectorUtils.inferErrorCode(outer));
         assertEquals("error.invalid_parameter", CollectorUtils.reasonOf(outer));
+    }
+
+    @Test
+    void zeroStatusStillFindsDeclaredCauseOrInfersTheReason() {
+        var declared = new CollectorFailure(InternalStatusCode.Bad_DeviceError, "error.device_error");
+        var wrapper = new CollectorFailure("error.read_timeout", 0, declared) {};
+        assertEquals(InternalStatusCode.Bad_DeviceError.getCode(), CollectorUtils.inferErrorCode(wrapper));
+        assertEquals("error.device_error", CollectorUtils.reasonOf(wrapper));
+
+        var undeclared = new CollectorFailure("error.read_timeout", 0, null) {};
+        assertEquals(InternalStatusCode.Bad_ReadTimeout.getCode(), CollectorUtils.inferErrorCode(undeclared));
+        assertEquals("error.read_timeout", CollectorUtils.reasonOf(undeclared));
+        assertEquals(InternalStatusCode.Bad_InternalError.getCode(), CollectorUtils.inferErrorCode(null));
+        assertNull(CollectorUtils.reasonKey(null));
+    }
+
+    @Test
+    void reasonKeysKeepTheirSyntaxAndMessageTokenHandling() {
+        for (String key : new String[]{"error.read_timeout", "modbus.ReadHoldingRegisters.IllegalDataAddress", "a.0_B.c"}) {
+            assertEquals(key, CollectorUtils.reasonKey(new RuntimeException("  " + key + " details")));
+        }
+        for (String message : new String[]{"", "ordinary", ".invalid", "error.", "error..invalid", "1.invalid", "error.bad!", "error.中文"}) {
+            assertNull(CollectorUtils.reasonKey(new RuntimeException(message)), message);
+        }
     }
 
     @Test
