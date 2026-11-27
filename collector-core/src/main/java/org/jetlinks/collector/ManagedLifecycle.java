@@ -65,6 +65,8 @@ public abstract class ManagedLifecycle<
         LOADING = AtomicReferenceFieldUpdater.newUpdater(ManagedLifecycle.class, ReloadDisposable.class, "loading");
     private volatile ReloadDisposable loading;
     private long reloadSequence;
+    private volatile Mono<LifecycleResult> closing;
+    private volatile LifecycleResult previousCloseResult = LifecycleResult.confirmed;
 
     @SuppressWarnings("all")
     private static final AtomicReferenceFieldUpdater<ManagedLifecycle, State>
@@ -167,6 +169,30 @@ public abstract class ManagedLifecycle<
         }
     }
 
+    /** 先撤销本地实例，再等待插件清理；取消时由调用方持有清理作业。 */
+    public final Mono<LifecycleResult> unloadAsync() {
+        return Mono.defer(() -> {
+            synchronized (this) {
+                ++reloadSequence;
+                ReloadDisposable.disposeNotReload(LOADING.get(this));
+                if (closing != null) return closing;
+                T previous = (T) LOADED.getAndSet(this, null);
+                if (previous == null) return Mono.just(previousCloseResult);
+                closing = Mono.defer(previous::closeAsync)
+                    .map(this::finishClosing)
+                    .doOnError(error -> finishClosing(LifecycleResult.unknown)).cache();
+                return closing;
+            }
+        });
+    }
+
+    private synchronized LifecycleResult finishClosing(LifecycleResult result) {
+        previousCloseResult = previousCloseResult == LifecycleResult.confirmed && result == LifecycleResult.confirmed
+            ? LifecycleResult.confirmed : LifecycleResult.unknown;
+        closing = null;
+        return previousCloseResult;
+    }
+
     private class LoadSubscriber extends BaseSubscriber<T> implements ReloadDisposable {
 
         final RC newRC;
@@ -249,7 +275,16 @@ public abstract class ManagedLifecycle<
             synchronized (ManagedLifecycle.this) {
                 if (LOADING.get(ManagedLifecycle.this) != this) return;
                 try {
-                    reload0 = Objects.requireNonNull(reload0(), "reload publisher");
+                    Mono<LifecycleResult> previousClose = closing;
+                    reload0 = previousClose == null ? Objects.requireNonNull(reload0(), "reload publisher")
+                        : previousClose.then(Mono.defer(() -> {
+                            synchronized (ManagedLifecycle.this) {
+                                if (LOADING.get(ManagedLifecycle.this) != this || ManagedLifecycle.this.isDisposed()) {
+                                    return Mono.error(new CancellationException("reload was superseded or disposed"));
+                                }
+                                return Objects.requireNonNull(reload0(), "reload publisher");
+                            }
+                        }));
                 } catch (Throwable e) {
                     this.onError(e);
                     return;
@@ -347,6 +382,7 @@ public abstract class ManagedLifecycle<
 
     private void tryDispose(Object value) {
         if (value instanceof Disposable) {
+            previousCloseResult = LifecycleResult.unknown;
             ((Disposable) value).dispose();
         }
     }
