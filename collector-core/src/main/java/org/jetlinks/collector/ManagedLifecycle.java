@@ -8,10 +8,13 @@ import org.jetlinks.core.utils.Reactors;
 import reactor.core.Disposable;
 import reactor.core.Disposables;
 import reactor.core.publisher.*;
+import reactor.util.context.Context;
 
 import java.time.Duration;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 
@@ -61,6 +64,7 @@ public abstract class ManagedLifecycle<
     static final AtomicReferenceFieldUpdater<ManagedLifecycle, ReloadDisposable>
         LOADING = AtomicReferenceFieldUpdater.newUpdater(ManagedLifecycle.class, ReloadDisposable.class, "loading");
     private volatile ReloadDisposable loading;
+    private long reloadSequence;
 
     @SuppressWarnings("all")
     private static final AtomicReferenceFieldUpdater<ManagedLifecycle, State>
@@ -111,15 +115,12 @@ public abstract class ManagedLifecycle<
             @SuppressWarnings("all")
             Sinks.One<T> loading = AWAIT.get(this);
             if (loading == null) {
-                if (AWAIT.compareAndSet(this, null, loading = Sinks.one())) {
-                    Sinks.One<T> finalLoading = loading;
-                    return loading
-                        .asMono()
-                        .timeout(Duration.ofSeconds(10),
-                                 Mono.fromSupplier(() -> this.loaded))
-                        .doOnError(err -> AWAIT.compareAndSet(this, finalLoading, null));
-                }
+                if (!AWAIT.compareAndSet(this, null, loading = Sinks.one())) continue;
             }
+            Sinks.One<T> finalLoading = loading;
+            return loading.asMono()
+                .timeout(Duration.ofSeconds(10), Mono.fromSupplier(() -> this.loaded))
+                .doOnError(err -> AWAIT.compareAndSet(this, finalLoading, null));
         }
     }
 
@@ -129,23 +130,41 @@ public abstract class ManagedLifecycle<
         return reload(runtimeConfig, managedConfig);
     }
 
-    public final Mono<Void> reload(RC runtimeConfig,
-                                   MC managedConfig) {
-
-        if (isDisposed()) {
-            return Mono.empty();
-        }
-
-        return Mono
-            .create(sink -> {
-                LoadSubscriber subscriber = new LoadSubscriber(runtimeConfig, managedConfig, sink);
-                sink.onDispose(subscriber);
-                subscriber.reload();
-            });
+    /**
+     * 替换一个运行实例；成功仅表示本次新配置生效。失败恢复可用的旧实例和配置并透传原错误，
+     * 不隐式重新加载旧配置。被新请求替代的加载以取消错误结束，迟到实例会被释放。
+     */
+    public final Mono<Void> reload(RC runtimeConfig, MC managedConfig) {
+        return Mono.create(sink -> {
+            LoadSubscriber subscriber;
+            synchronized (this) {
+                long sequence = ++reloadSequence;
+                ReloadDisposable.disposeNotReload(LOADING.get(this));
+                if (isDisposed() || sequence != reloadSequence) {
+                    sink.error(new CancellationException("reload was superseded or disposed"));
+                    return;
+                }
+                subscriber = new LoadSubscriber(runtimeConfig, managedConfig, sink);
+                LOADING.set(this, subscriber);
+                RUNTIME_CONFIG.set(this, runtimeConfig);
+                MANAGED_CONFIG.set(this, managedConfig);
+            }
+            sink.onCancel(subscriber::cancelByCaller);
+            subscriber.reload();
+        });
     }
 
     protected void onLoadError(Throwable e) {
 
+    }
+
+    /** 释放当前协议实例，保留配置、管理状态和包装对象，供父子树按顺序重新加载。 */
+    public final void unload() {
+        synchronized (this) {
+            ++reloadSequence;
+            ReloadDisposable.disposeNotReload(LOADING.get(this));
+            tryDispose(LOADED.getAndSet(this, null));
+        }
     }
 
     private class LoadSubscriber extends BaseSubscriber<T> implements ReloadDisposable {
@@ -155,28 +174,31 @@ public abstract class ManagedLifecycle<
         final T oldLoaded;
         final RC oldRC;
         final MC oldMC;
-        MonoSink<Void> signal;
-
+        final MonoSink<Void> signal;
         T newLoaded;
-        boolean rollback = true;
-        boolean rollbackLoad = true;
+        volatile boolean callerCancelled;
 
         public LoadSubscriber(RC newRC, MC newMC, MonoSink<Void> signal) {
             this.newMC = newMC;
             this.newRC = newRC;
             this.signal = signal;
-            ReloadDisposable.disposeNotReload(LOADING.getAndSet(ManagedLifecycle.this, this));
-            //配置回滚后赋值
             oldLoaded = loaded;
             oldRC = runtimeConfig;
             oldMC = managedConfig;
-            RUNTIME_CONFIG.compareAndSet(ManagedLifecycle.this, oldRC, newRC);
-            MANAGED_CONFIG.compareAndSet(ManagedLifecycle.this, oldMC, newMC);
         }
 
         @Override
+        public Context currentContext() { return Context.of(signal.contextView()); }
+
+        @Override
         protected void hookOnNext(@Nonnull T value) {
-            if (LOADED.compareAndSet(ManagedLifecycle.this, oldLoaded, newLoaded = value)) {
+            synchronized (ManagedLifecycle.this) {
+                if (LOADING.get(ManagedLifecycle.this) != this || ManagedLifecycle.this.isDisposed()) {
+                    tryDispose(value);
+                    return;
+                }
+                newLoaded = value;
+                LOADED.set(ManagedLifecycle.this, value);
                 tryDispose(oldLoaded);
                 ManagedLifecycle.this.handleLoaded(value);
             }
@@ -184,77 +206,64 @@ public abstract class ManagedLifecycle<
 
         @Override
         protected void hookOnComplete() {
-            @SuppressWarnings("all")
-            Sinks.One<T> await = AWAIT.getAndSet(ManagedLifecycle.this, null);
-            if (await != null) {
-                @SuppressWarnings("all")
-                T loaded = (T) LOADED.get(ManagedLifecycle.this);
-                if (loaded != null) {
-                    await.emitValue(loaded, Reactors.emitFailureHandler());
-                }
+            Sinks.One<T> await;
+            synchronized (ManagedLifecycle.this) {
+                if (!LOADING.compareAndSet(ManagedLifecycle.this, this, null)) return;
+                await = AWAIT.getAndSet(ManagedLifecycle.this, null);
             }
+            if (await != null) {
+                await.emitValue(newLoaded, Reactors.emitFailureHandler());
+            }
+            signal.success();
         }
 
         @Override
         protected void hookOnError(@Nonnull Throwable throwable) {
-            rollback();
-            onLoadError(throwable);
+            failed(throwable, true);
         }
 
         @Override
         protected void hookOnCancel() {
-            rollback();
+            failed(new CancellationException("reload was cancelled"), false);
         }
 
-        private void rollback() {
-            if (rollback) {
-                // 加载失败 回退配置
-                RUNTIME_CONFIG.compareAndSet(ManagedLifecycle.this, newRC, oldRC);
-                MANAGED_CONFIG.compareAndSet(ManagedLifecycle.this, newMC, oldMC);
-                LOADED.compareAndSet(ManagedLifecycle.this, newLoaded, oldLoaded);
-                try {
+        private void failed(Throwable error, boolean report) {
+            Sinks.One<T> await = null;
+            synchronized (ManagedLifecycle.this) {
+                if (LOADING.compareAndSet(ManagedLifecycle.this, this, null)) {
+                    RUNTIME_CONFIG.compareAndSet(ManagedLifecycle.this, newRC, oldRC);
+                    MANAGED_CONFIG.compareAndSet(ManagedLifecycle.this, newMC, oldMC);
+                    LOADED.set(ManagedLifecycle.this,
+                        oldLoaded != null && !oldLoaded.isDisposed() ? oldLoaded : null);
                     tryDispose(newLoaded);
-                    if (rollbackLoad) {
-                        Lifecycle old = LOADED.get(ManagedLifecycle.this);
-                        if (old != null && old == this.oldLoaded) {
-                            MonoSink<Void> _signal = this.signal;
-                            this.signal = null;
-                            //使用回退后的配置重新加载，且不再回退
-                            LoadSubscriber reloadSubscriber = new LoadSubscriber(runtimeConfig, managedConfig, _signal);
-                            reloadSubscriber.rollback = false;
-                            reloadSubscriber.reload();
-                        }
-                    }
-                } catch (Throwable e) {
-                    onLoadError(e);
+                    await = AWAIT.getAndSet(ManagedLifecycle.this, null);
+                    if (report) onLoadError(error);
                 }
             }
+            if (await != null) await.tryEmitError(error);
+            if (!callerCancelled) signal.error(error);
         }
 
         void reload() {
             Mono<T> reload0;
-            try {
-                reload0 = reload0();
-            } catch (Throwable e) {
-                this.hookOnError(e);
-                return;
+            synchronized (ManagedLifecycle.this) {
+                if (LOADING.get(ManagedLifecycle.this) != this) return;
+                try {
+                    reload0 = Objects.requireNonNull(reload0(), "reload publisher");
+                } catch (Throwable e) {
+                    this.onError(e);
+                    return;
+                }
             }
-            reload0.subscribe(this);
+            reload0.switchIfEmpty(Mono.error(new IllegalStateException("reload returned no runtime")))
+                .doOnDiscard(Lifecycle.class, ManagedLifecycle.this::tryDispose)
+                .subscribe(this);
         }
 
         @Override
-        protected void hookFinally(@Nonnull SignalType type) {
-            LOADING.compareAndSet(ManagedLifecycle.this, this, null);
-            if (signal != null) {
-                signal.success();
-            }
-        }
+        public void disposeNotReload() { dispose(); }
 
-        @Override
-        public void disposeNotReload() {
-            rollbackLoad = false;
-            this.dispose();
-        }
+        void cancelByCaller() { callerCancelled = true; dispose(); }
     }
 
     public interface ReloadDisposable extends Disposable {
@@ -329,9 +338,11 @@ public abstract class ManagedLifecycle<
 
     @Override
     public void dispose() {
-        disposable.dispose();
-        ReloadDisposable.disposeNotReload(LOADING.getAndSet(this, null));
-        tryDispose(LOADED.getAndSet(this, null));
+        synchronized (this) {
+            disposable.dispose();
+            ReloadDisposable.disposeNotReload(LOADING.get(this));
+            tryDispose(LOADED.getAndSet(this, null));
+        }
     }
 
     private void tryDispose(Object value) {
