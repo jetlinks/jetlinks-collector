@@ -12,6 +12,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
 
 /** 为使用阻塞 Socket 的协议 SDK 记录实际流字节，保留原有连接参数与关闭语义。 */
 public final class TransportSocketFactory extends SocketFactory {
@@ -49,23 +50,38 @@ public final class TransportSocketFactory extends SocketFactory {
                 return new FilterInputStream(super.getInputStream()) {
                     @Override
                     public int read() throws IOException {
-                        int value = in.read();
-                        if (value >= 0) metrics.received(1);
-                        return value;
+                        try {
+                            int value = in.read();
+                            if (value >= 0) metrics.received(1);
+                            return value;
+                        } catch (IOException error) {
+                            recordFailure(error);
+                            throw error;
+                        }
                     }
 
                     @Override
                     public int read(byte[] bytes, int offset, int length) throws IOException {
-                        int count = in.read(bytes, offset, length);
-                        if (count > 0) metrics.received(count);
-                        return count;
+                        try {
+                            int count = in.read(bytes, offset, length);
+                            if (count > 0) metrics.received(count);
+                            return count;
+                        } catch (IOException error) {
+                            recordFailure(error);
+                            throw error;
+                        }
                     }
 
                     @Override
                     public long skip(long length) throws IOException {
-                        long count = in.skip(length);
-                        if (count > 0) metrics.received(count);
-                        return count;
+                        try {
+                            long count = in.skip(length);
+                            if (count > 0) metrics.received(count);
+                            return count;
+                        } catch (IOException error) {
+                            recordFailure(error);
+                            throw error;
+                        }
                     }
                 };
             }
@@ -75,16 +91,31 @@ public final class TransportSocketFactory extends SocketFactory {
                 return new FilterOutputStream(super.getOutputStream()) {
                     @Override
                     public void write(int value) throws IOException {
-                        out.write(value);
-                        metrics.sent(1);
+                        try {
+                            out.write(value);
+                            metrics.sent(1);
+                        } catch (IOException error) {
+                            recordFailure(error);
+                            throw error;
+                        }
                     }
 
                     @Override
                     public void write(byte[] bytes, int offset, int length) throws IOException {
-                        out.write(bytes, offset, length);
-                        if (length > 0) metrics.sent(length);
+                        try {
+                            out.write(bytes, offset, length);
+                            if (length > 0) metrics.sent(length);
+                        } catch (IOException error) {
+                            recordFailure(error);
+                            throw error;
+                        }
                     }
                 };
+            }
+
+            private void recordFailure(IOException error) {
+                // 读超时可能用于协议轮询；本地主动关闭属于取消，均不计传输故障。
+                if (!isClosed() && !(error instanceof SocketTimeoutException)) metrics.transportError();
             }
 
             @Override

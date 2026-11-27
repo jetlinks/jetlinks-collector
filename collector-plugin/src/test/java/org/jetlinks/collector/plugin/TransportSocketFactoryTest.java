@@ -39,6 +39,7 @@ class TransportSocketFactoryTest {
                 assertEquals(8, metrics.getReadBytes());
                 assertEquals(6, metrics.getWrittenBytes());
                 assertEquals(0, metrics.getTotalMessages());
+                assertEquals(0, metrics.getTransportErrors());
             }
             socket.close();
             assertEquals(0, metrics.getActiveConnections());
@@ -62,4 +63,70 @@ class TransportSocketFactoryTest {
         assertEquals(0, metrics.getReadBytes());
         assertEquals(0, metrics.getWrittenBytes());
     }
+
+    @Test
+    void resetCountsReadSkipAndWriteErrorsOncePerOperation() throws Exception {
+        var metrics = new ConnectionMetricsRecorder();
+        var factory = new TransportSocketFactory(metrics);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            var accepted = CompletableFuture.supplyAsync(() -> {
+                try { return server.accept(); }
+                catch (Exception error) { throw new RuntimeException(error); }
+            });
+            try (Socket socket = factory.createSocket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+                 Socket peer = accepted.get(5, TimeUnit.SECONDS)) {
+                socket.setSoTimeout(2000);
+                var in = socket.getInputStream();
+                var out = socket.getOutputStream();
+                peer.setSoLinger(true, 0);
+                peer.close();
+                assertThrows(java.net.SocketException.class, in::read);
+                assertEquals(1, metrics.getTransportErrors());
+                assertThrows(java.io.IOException.class, () -> in.read(new byte[4]));
+                assertEquals(2, metrics.getTransportErrors());
+                assertThrows(java.io.IOException.class, () -> in.skip(1));
+                assertEquals(3, metrics.getTransportErrors());
+                assertThrows(java.io.IOException.class, () -> out.write(new byte[]{1}));
+                assertEquals(4, metrics.getTransportErrors());
+                assertThrows(java.io.IOException.class, () -> out.write(1));
+                assertEquals(5, metrics.getTransportErrors());
+                assertEquals(0, metrics.getReadBytes());
+                assertEquals(0, metrics.getWrittenBytes());
+                socket.close();
+                assertThrows(java.io.IOException.class, in::read);
+                assertEquals(5, metrics.getTransportErrors(), "local close is not another transport failure");
+            }
+        }
+    }
+
+    @Test
+    void readTimeoutAndCancellationDoNotBecomeTransportFailures() throws Exception {
+        var metrics = new ConnectionMetricsRecorder();
+        var factory = new TransportSocketFactory(metrics);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            var accepted = CompletableFuture.supplyAsync(() -> {
+                try { return server.accept(); }
+                catch (Exception error) { throw new RuntimeException(error); }
+            });
+            try (Socket socket = factory.createSocket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+                 Socket peer = accepted.get(5, TimeUnit.SECONDS)) {
+                var in = socket.getInputStream();
+                socket.setSoTimeout(50);
+                assertThrows(java.net.SocketTimeoutException.class, in::read);
+                assertEquals(0, metrics.getTransportErrors());
+                socket.setSoTimeout(0);
+                var reading = new java.util.concurrent.CountDownLatch(1);
+                var cancelled = CompletableFuture.runAsync(() -> {
+                    reading.countDown();
+                    assertThrows(java.io.IOException.class, in::read);
+                });
+                assertTrue(reading.await(5, TimeUnit.SECONDS));
+                socket.close();
+                cancelled.get(5, TimeUnit.SECONDS);
+                assertEquals(0, metrics.getTransportErrors());
+                assertEquals(0, metrics.getActiveConnections());
+            }
+        }
+    }
+
 }
