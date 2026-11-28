@@ -60,6 +60,38 @@ class AbstractPointSubscriptionTest {
     }
 
     @Test
+    void awaitSubscribeWaitsForAnAlreadyPendingLegacyCall() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        Sinks.Empty<Void> commit = Sinks.empty();
+        controlled.commits.add(commit.asMono());
+        controlled.subscribe(List.of("p"));
+        StepVerifier.create(controlled.awaitSubscribe(List.of("p")))
+            .expectSubscription()
+            .then(() -> assertFalse(controlled.subscribed("p")))
+            .then(commit::tryEmitEmpty)
+            .expectNext(LifecycleResult.unknown)
+            .verifyComplete();
+        assertTrue(controlled.subscribed("p"));
+        assertEquals(1, controlled.subscribeCount);
+        controlled.dispose();
+    }
+
+    @Test
+    void closeAsyncWaitsForRemoteRemovalAndDoesNotClaimConfirmation() {
+        AsyncSubscription controlled = new AsyncSubscription(mockListener);
+        controlled.subscribe(List.of("p"));
+        Sinks.Empty<Void> removed = Sinks.empty();
+        controlled.removals.add(removed.asMono());
+        StepVerifier.create(controlled.closeAsync())
+            .expectSubscription()
+            .then(() -> assertFalse(controlled.isDisposed()))
+            .then(removed::tryEmitEmpty)
+            .expectNext(LifecycleResult.unknown)
+            .verifyComplete();
+        assertTrue(controlled.isDisposed());
+    }
+
+    @Test
     void testSubscribeSinglePoint() throws InterruptedException {
         // 准备测试数据
         String pointId = "test-point-1";

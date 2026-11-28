@@ -63,4 +63,35 @@ public class LazyPointSubscription implements PointSubscription {
     public void dispose() {
         holder.dispose();
     }
+
+    @Override
+    public reactor.core.publisher.Mono<org.jetlinks.collector.LifecycleResult> awaitSubscribe(Collection<String> requested) {
+        return reactor.core.publisher.Mono.defer(() -> {
+            points.addAll(requested);
+            Disposable target = holder.get();
+            return target instanceof PointSubscription subscription ? subscription.awaitSubscribe(requested)
+                : reactor.core.publisher.Mono.just(org.jetlinks.collector.LifecycleResult.unknown);
+        });
+    }
+
+    @Override
+    public reactor.core.publisher.Mono<org.jetlinks.collector.LifecycleResult> awaitUnsubscribe(Collection<String> removing) {
+        return reactor.core.publisher.Mono.defer(() -> {
+            points.removeAll(removing);
+            Disposable target = holder.get();
+            return target instanceof PointSubscription subscription ? subscription.awaitUnsubscribe(removing)
+                : reactor.core.publisher.Mono.just(org.jetlinks.collector.LifecycleResult.unknown);
+        });
+    }
+
+    @Override
+    public reactor.core.publisher.Mono<org.jetlinks.collector.LifecycleResult> closeAsync() {
+        return reactor.core.publisher.Mono.defer(() -> {
+            Disposable target = holder.get();
+            return target instanceof PointSubscription subscription
+                ? subscription.closeAsync().doFinally(ignore -> holder.dispose())
+                : reactor.core.publisher.Mono.fromRunnable(holder::dispose)
+                    .thenReturn(org.jetlinks.collector.LifecycleResult.unknown);
+        }).cache();
+    }
 }

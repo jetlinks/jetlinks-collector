@@ -42,6 +42,11 @@ public interface Lifecycle extends Wrapper, Disposable {
      */
     void dispose();
 
+    /** 兼容旧实现，完成不代表远端已经关闭；有确认能力的插件覆盖此入口。 */
+    default Mono<LifecycleResult> closeAsync() {
+        return Mono.fromRunnable(this::dispose).thenReturn(LifecycleResult.unknown);
+    }
+
     /**
      * 监听状态变化
      *

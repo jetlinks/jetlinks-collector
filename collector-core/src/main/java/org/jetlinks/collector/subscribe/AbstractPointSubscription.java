@@ -234,6 +234,35 @@ public abstract class AbstractPointSubscription<P extends DataCollectorProvider.
     protected abstract void doDispose();
 
     @Override
+    public Mono<org.jetlinks.collector.LifecycleResult> awaitSubscribe(Collection<String> points) {
+        return subscribeAsync(points).thenMany(Flux.fromIterable(points).concatMap(id -> Mono.defer(() -> {
+            synchronized (lifecycleLock) {
+                PendingSubscription request = pending.get(id);
+                return request == null ? Mono.empty() : request.finished.asMono();
+            }
+        }))).then().thenReturn(org.jetlinks.collector.LifecycleResult.unknown);
+    }
+
+    @Override
+    public Mono<org.jetlinks.collector.LifecycleResult> awaitUnsubscribe(Collection<String> points) {
+        return unsubscribeAsync(points).thenReturn(org.jetlinks.collector.LifecycleResult.unknown);
+    }
+
+    @Override
+    public Mono<org.jetlinks.collector.LifecycleResult> closeAsync() {
+        return Mono.defer(() -> {
+            Set<String> ids;
+            synchronized (lifecycleLock) {
+                ids = new HashSet<>(keySet());
+                ids.addAll(pending.keySet());
+            }
+            return unsubscribeAsync(ids)
+                .then(Mono.fromRunnable(this::dispose))
+                .thenReturn(org.jetlinks.collector.LifecycleResult.unknown);
+        });
+    }
+
+    @Override
     public final boolean subscribed(String pointId) {
         S s = get(pointId);
         return s != null && s.isSubscribed();

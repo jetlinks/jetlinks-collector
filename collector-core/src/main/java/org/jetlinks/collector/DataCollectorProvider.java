@@ -97,6 +97,11 @@ public interface DataCollectorProvider extends CommandSupport {
         return Collections.emptySet();
     }
 
+    /** 不创建协议资源即可判断的待命能力。旧驱动默认不预热；不暗示跨进程会话或数据恢复。 */
+    default StandbyMode standbyMode(ChannelProperties properties) {
+        return StandbyMode.none;
+    }
+
 
 
     interface ChannelConfiguration {
@@ -204,6 +209,11 @@ public interface DataCollectorProvider extends CommandSupport {
      * @since 1.2.3
      */
     interface ChannelRuntime extends Lifecycle, CommandSupport {
+
+        /** 仅准备插件已声明的待命资源，不启动正式采集。 */
+        default Mono<Void> prepareStandby() {
+            return Mono.error(new UnsupportedOperationException("Standby preparation is not supported"));
+        }
 
         /**
          * 获取通道ID
