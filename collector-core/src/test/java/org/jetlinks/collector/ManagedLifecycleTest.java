@@ -8,6 +8,8 @@ import reactor.test.StepVerifier;
 import reactor.test.publisher.TestPublisher;
 
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -16,6 +18,93 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ManagedLifecycleTest {
+
+    @Test
+    void missingRuntimeWaitFailsAtDeadlineAndCanRecover() {
+        var runtime = mock(DataCollectorProvider.CollectorRuntime.class);
+        when(runtime.checkState()).thenReturn(Mono.just(running));
+        var lifecycle = lifecycle(Mono.just(runtime));
+        try {
+            StepVerifier.withVirtualTime(lifecycle::checkState)
+                .thenAwait(Duration.ofSeconds(10))
+                .expectError(TimeoutException.class)
+                .verify(Duration.ofSeconds(2));
+            lifecycle.reload("runtime", "managed").block();
+            assertEquals(running, lifecycle.checkState().block());
+        } finally {
+            lifecycle.dispose();
+        }
+    }
+
+    @Test
+    void deadlineStillFindsRuntimePublishedBeforeAwaitSignalWasRegistered() {
+        var runtime = mock(DataCollectorProvider.CollectorRuntime.class);
+        when(runtime.checkState()).thenReturn(Mono.just(running));
+        var lifecycle = lifecycle(Mono.just(runtime));
+        try {
+            StepVerifier.withVirtualTime(lifecycle::checkState)
+                // 模拟实例发布与等待信号注册之间的交错，保留到期读取当前实例的能力。
+                .then(() -> lifecycle.loaded = runtime)
+                .thenAwait(Duration.ofSeconds(10))
+                .expectNext(running)
+                .verifyComplete();
+        } finally {
+            lifecycle.dispose();
+        }
+    }
+
+    @Test
+    void stateCheckAssembledBeforeReplacementUsesCurrentRuntime() {
+        var old = mock(DataCollectorProvider.CollectorRuntime.class);
+        var next = mock(DataCollectorProvider.CollectorRuntime.class);
+        when(old.checkState()).thenReturn(Mono.just(stopped));
+        when(next.checkState()).thenReturn(Mono.just(running));
+        var source = new AtomicReference<Mono<DataCollectorProvider.CollectorRuntime>>(Mono.just(old));
+        var lifecycle = new ManagedLifecycle<DataCollectorProvider.CollectorRuntime, String, String>() {
+            @Override protected Mono<DataCollectorProvider.CollectorRuntime> reload0() { return source.get(); }
+        };
+        try {
+            lifecycle.reload("old", "old").block();
+            var check = lifecycle.checkState();
+            source.set(Mono.just(next));
+            lifecycle.reload("next", "next").block();
+
+            StepVerifier.create(check).expectNext(running).verifyComplete();
+            verify(old, never()).checkState();
+            verify(next).checkState();
+        } finally {
+            lifecycle.dispose();
+        }
+    }
+
+    @Test
+    void timingOutOneWaiterDoesNotDetachAnotherActiveWaiter() {
+        var runtime = mock(DataCollectorProvider.CollectorRuntime.class);
+        when(runtime.checkState()).thenReturn(Mono.just(running));
+        var source = Sinks.<DataCollectorProvider.CollectorRuntime>one();
+        var lifecycle = lifecycle(source.asMono());
+        var firstExpired = new java.util.concurrent.atomic.AtomicBoolean();
+        var secondValue = new AtomicReference<State>();
+        try {
+            StepVerifier.withVirtualTime(() -> {
+                Mono<Void> first = lifecycle.checkState()
+                    .doOnError(TimeoutException.class, error -> firstExpired.set(true))
+                    .onErrorResume(TimeoutException.class, error -> Mono.empty()).then();
+                Mono<Void> second = Mono.delay(Duration.ofSeconds(5)).then(lifecycle.checkState())
+                    .doOnNext(secondValue::set).then();
+                return Mono.when(first, second);
+            }).thenAwait(Duration.ofSeconds(10))
+                .then(() -> {
+                    assertTrue(firstExpired.get());
+                    lifecycle.reload("runtime", "managed").subscribe();
+                    source.tryEmitValue(runtime).orThrow();
+                    assertEquals(running, secondValue.get(), "load completion must wake an unexpired waiter immediately");
+                }).expectComplete().verify(Duration.ofSeconds(2));
+            verify(runtime).checkState();
+        } finally {
+            lifecycle.dispose();
+        }
+    }
 
     @Test
     void unloadRetainsConfigurationAndPauseStateForTreeRebuild() {

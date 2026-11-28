@@ -15,6 +15,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 
@@ -107,6 +108,7 @@ public abstract class ManagedLifecycle<
 
     }
 
+    /** 等待当前实例；超时/取消仅结束本次等待，共享信号由加载 owner 结算。 */
     protected Mono<T> tryLoad() {
         for (; ; ) {
             @SuppressWarnings("all")
@@ -119,10 +121,12 @@ public abstract class ManagedLifecycle<
             if (loading == null) {
                 if (!AWAIT.compareAndSet(this, null, loading = Sinks.one())) continue;
             }
-            Sinks.One<T> finalLoading = loading;
             return loading.asMono()
-                .timeout(Duration.ofSeconds(10), Mono.fromSupplier(() -> this.loaded))
-                .doOnError(err -> AWAIT.compareAndSet(this, finalLoading, null));
+                .timeout(Duration.ofSeconds(10), Mono.defer(() -> {
+                    // 加载可能在等待者注册前结束；到期仍无实例时不能伪装成正常空结果。
+                    T current = loaded();
+                    return current == null ? Mono.error(new TimeoutException("runtime load timed out")) : Mono.just(current);
+                }));
         }
     }
 
@@ -313,7 +317,7 @@ public abstract class ManagedLifecycle<
 
     @Override
     public Mono<State> checkState() {
-        return tryLoad().flatMap(Lifecycle::checkState);
+        return Mono.defer(this::tryLoad).flatMap(Lifecycle::checkState);
     }
 
     public State managedState() {
